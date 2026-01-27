@@ -107,12 +107,12 @@ export default function Page() {
       </div>
 
       <div className="flex items-center justify-between gap-3">
-        <Link href="/app/onborarding/step-1" className="text-xs text-neutral-600 hover:underline">
+        <Link href="/app/onboarding/step-1" className="text-xs text-neutral-600 hover:underline">
           Назад
         </Link>
 
         <Link
-          href="/app/onborarding/step-3"
+          href="/app/onboarding/step-3"
           className="rounded-full bg-neutral-900 px-4 py-2 text-xs font-semibold text-white hover:bg-neutral-800"
         >
           Дальше

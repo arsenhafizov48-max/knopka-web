@@ -2,7 +2,42 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { loadProjectFact, patchProjectFact, setLastStep, toggleInArray, type LegalForm, type WorkFormat } from "../../lib/projectFact";
+import {
+  loadProjectFact,
+  patchProjectFact,
+  setLastStep,
+  toggleInArray,
+  type LegalForm,
+  type WorkFormat,
+} from "../../lib/projectFact";
+
+type Economics = {
+  product: string;
+  averageCheck: string;
+  marginPercent: string;
+};
+
+type FactShape = any; // чтобы не упереться в типы из либы, но при этом держать обязательные поля в форме
+
+function normalizeFact(raw: FactShape) {
+  const economics: Economics = {
+    product: "",
+    averageCheck: "",
+    marginPercent: "",
+    ...(raw?.economics ?? {}),
+  };
+
+  return {
+    legalForm: raw?.legalForm ?? ("ИП" as LegalForm),
+    niche: raw?.niche ?? "",
+    geo: raw?.geo ?? "",
+    workFormat: raw?.workFormat ?? ("Онлайн" as WorkFormat),
+    services: Array.isArray(raw?.services) ? raw.services : [],
+    revenueRange: raw?.revenueRange ?? "",
+    goals: Array.isArray(raw?.goals) ? raw.goals : [],
+    economics,
+  };
+}
 
 function Pill({
   active,
@@ -19,7 +54,9 @@ function Pill({
       onClick={onClick}
       className={[
         "rounded-full border px-4 py-2 text-sm transition",
-        active ? "border-blue-600 bg-blue-50 text-blue-700" : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50",
+        active
+          ? "border-blue-600 bg-blue-50 text-blue-700"
+          : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50",
       ].join(" ")}
     >
       {children}
@@ -36,7 +73,7 @@ function StepDots({ active }: { active: 1 | 2 | 3 | 4 }) {
   ] as const;
 
   return (
-    <div className="mt-2 flex items-center gap-5 text-sm text-neutral-500">
+    <div className="mt-1 flex items-center gap-4 text-sm text-neutral-500">
       {items.map((it, idx) => {
         const isActive = it.n === active;
         const isDone = it.n < active;
@@ -45,7 +82,11 @@ function StepDots({ active }: { active: 1 | 2 | 3 | 4 }) {
             <span
               className={[
                 "inline-flex h-6 w-6 items-center justify-center rounded-full border text-xs",
-                isActive ? "border-blue-600 bg-blue-600 text-white" : isDone ? "border-blue-200 bg-blue-50 text-blue-700" : "border-neutral-200 bg-white",
+                isActive
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : isDone
+                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                  : "border-neutral-200 bg-white",
               ].join(" ")}
             >
               {it.n}
@@ -60,7 +101,8 @@ function StepDots({ active }: { active: 1 | 2 | 3 | 4 }) {
 }
 
 export default function Page() {
-  const [fact, setFact] = useState(() => loadProjectFact());
+  // ВАЖНО: не читаем localStorage в первом рендере (SSR), иначе hydration mismatch.
+  const [fact, setFact] = useState(() => normalizeFact({}));
   const [serviceDraft, setServiceDraft] = useState("");
   const [addingService, setAddingService] = useState(false);
 
@@ -69,7 +111,9 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    setFact(loadProjectFact());
+    // грузим фактуру после маунта (уже на клиенте)
+    const loaded = loadProjectFact();
+    setFact(normalizeFact(loaded));
   }, []);
 
   const canNext = useMemo(() => {
@@ -89,7 +133,7 @@ export default function Page() {
   };
 
   const setField = (patch: any) => {
-    const next = { ...fact, ...patch };
+    const next = normalizeFact({ ...fact, ...patch });
     setFact(next);
     patchProjectFact(patch);
   };
@@ -97,30 +141,28 @@ export default function Page() {
   const addService = () => {
     const val = serviceDraft.trim();
     if (!val) return;
-    if (fact.services.includes(val)) {
+
+    if ((fact.services ?? []).includes(val)) {
       setServiceDraft("");
       setAddingService(false);
       return;
     }
-    const nextServices = [...fact.services, val];
+
+    const nextServices = [...(fact.services ?? []), val];
     setFact({ ...fact, services: nextServices });
     patchProjectFact({ services: nextServices });
+
     setServiceDraft("");
     setAddingService(false);
   };
 
   const removeService = (name: string) => {
-    const nextServices = fact.services.filter((x: string) => x !== name);
+    const nextServices = (fact.services ?? []).filter((x: string) => x !== name);
     setFact({ ...fact, services: nextServices });
     patchProjectFact({ services: nextServices });
   };
 
-  const revenueOptions = [
-    "до 300 000 ₽",
-    "300–700 000 ₽",
-    "700 000–1,5 млн ₽",
-    "1,5+ млн ₽",
-  ];
+  const revenueOptions = ["до 300 000 ₽", "300–700 000 ₽", "700 000–1,5 млн ₽", "1,5+ млн ₽"];
 
   const goalOptions = [
     "Больше заявок",
@@ -131,23 +173,32 @@ export default function Page() {
   ];
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+    <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
       {/* LEFT */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6">
+      <div className="rounded-2xl border border-neutral-200 bg-white p-5">
         <div className="text-sm text-neutral-500">Шаг 1 из 4</div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Расскажите о бизнесе</h1>
+        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Расскажите о бизнесе</h1>
 
         <StepDots active={1} />
 
-        <div className="mt-6 space-y-6">
+        {/* меньше вертикальных отступов */}
+        <div className="mt-3 space-y-4">
           {/* legal form */}
           <div>
             <div className="mb-2 text-sm text-neutral-700">Юридическая форма</div>
             <div className="flex flex-wrap gap-2">
-              <Pill active={fact.legalForm === "ИП"} onClick={() => setLegalForm("ИП")}>ИП</Pill>
-              <Pill active={fact.legalForm === "ООО"} onClick={() => setLegalForm("ООО")}>ООО</Pill>
-              <Pill active={fact.legalForm === "Самозанятый"} onClick={() => setLegalForm("Самозанятый")}>Самозанятый</Pill>
-              <Pill active={fact.legalForm === "Другое"} onClick={() => setLegalForm("Другое")}>Другое</Pill>
+              <Pill active={fact.legalForm === "ИП"} onClick={() => setLegalForm("ИП")}>
+                ИП
+              </Pill>
+              <Pill active={fact.legalForm === "ООО"} onClick={() => setLegalForm("ООО")}>
+                ООО
+              </Pill>
+              <Pill active={fact.legalForm === "Самозанятый"} onClick={() => setLegalForm("Самозанятый")}>
+                Самозанятый
+              </Pill>
+              <Pill active={fact.legalForm === "Другое"} onClick={() => setLegalForm("Другое")}>
+                Другое
+              </Pill>
             </div>
           </div>
 
@@ -157,7 +208,7 @@ export default function Page() {
             <input
               value={fact.niche}
               onChange={(e) => setField({ niche: e.target.value })}
-              className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
+              className="w-full max-w-[680px] rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
               placeholder="Например: салон красоты, стоматология, онлайн-курсы"
             />
           </div>
@@ -168,7 +219,7 @@ export default function Page() {
             <input
               value={fact.geo}
               onChange={(e) => setField({ geo: e.target.value })}
-              className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
+              className="w-full max-w-[680px] rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
               placeholder="Например: Казань"
             />
           </div>
@@ -177,9 +228,15 @@ export default function Page() {
           <div>
             <div className="mb-2 text-sm text-neutral-700">Формат работы</div>
             <div className="flex flex-wrap gap-2">
-              <Pill active={fact.workFormat === "Онлайн"} onClick={() => setWorkFormat("Онлайн")}>Онлайн</Pill>
-              <Pill active={fact.workFormat === "Офлайн"} onClick={() => setWorkFormat("Офлайн")}>Офлайн</Pill>
-              <Pill active={fact.workFormat === "Смешанный"} onClick={() => setWorkFormat("Смешанный")}>Смешанный</Pill>
+              <Pill active={fact.workFormat === "Онлайн"} onClick={() => setWorkFormat("Онлайн")}>
+                Онлайн
+              </Pill>
+              <Pill active={fact.workFormat === "Офлайн"} onClick={() => setWorkFormat("Офлайн")}>
+                Офлайн
+              </Pill>
+              <Pill active={fact.workFormat === "Смешанный"} onClick={() => setWorkFormat("Смешанный")}>
+                Смешанный
+              </Pill>
             </div>
           </div>
 
@@ -187,9 +244,16 @@ export default function Page() {
           <div>
             <div className="mb-2 text-sm text-neutral-700">Средний чек (в ₽)</div>
             <input
-              value={fact.economics?.averageCheck ?? ""}
-              onChange={(e) => setField({ economics: { ...fact.economics, averageCheck: e.target.value } })}
-              className="w-full max-w-[240px] rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
+              value={(fact.economics?.averageCheck ?? "") as string}
+              onChange={(e) =>
+                setField({
+                  economics: {
+                    ...(fact.economics as Economics),
+                    averageCheck: e.target.value,
+                  },
+                })
+              }
+              className="w-full max-w-[260px] rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
               placeholder="Например: 7 000"
             />
           </div>
@@ -252,11 +316,7 @@ export default function Page() {
             <div className="mb-2 text-sm text-neutral-700">Примерная месячная выручка</div>
             <div className="flex flex-wrap gap-2">
               {revenueOptions.map((opt) => (
-                <Pill
-                  key={opt}
-                  active={fact.revenueRange === opt}
-                  onClick={() => setField({ revenueRange: opt })}
-                >
+                <Pill key={opt} active={fact.revenueRange === opt} onClick={() => setField({ revenueRange: opt })}>
                   {opt}
                 </Pill>
               ))}
@@ -289,7 +349,7 @@ export default function Page() {
           </div>
 
           {/* footer */}
-          <div className="flex items-center justify-between pt-4">
+          <div className="flex items-center justify-between pt-2">
             <Link
               href="/app/dashboard"
               className="rounded-full border border-neutral-200 bg-white px-5 py-2.5 text-sm text-neutral-700 hover:bg-neutral-50"
@@ -313,30 +373,26 @@ export default function Page() {
         </div>
       </div>
 
-      {/* RIGHT */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6">
-        <h2 className="text-xl font-semibold tracking-tight">Зачем мы это спрашиваем</h2>
+      {/* RIGHT (короче, без огромных блоков) */}
+      <div className="rounded-2xl border border-neutral-200 bg-white p-5 self-start">
+        <h2 className="text-xl font-semibold tracking-tight">Зачем эти вопросы</h2>
         <p className="mt-2 text-sm text-neutral-600">
-          Кнопка соберёт профиль бизнеса и подстроит аналитику и рекомендации под вашу ситуацию.
+          Мы соберём профиль бизнеса и подстроим рекомендации под вашу ситуацию.
         </p>
 
         <ul className="mt-4 space-y-2 text-sm text-neutral-700">
           <li className="flex gap-2">
             <span className="mt-2 h-2 w-2 rounded-full bg-blue-600" />
-            Определим формат и каналы, которые подойдут вашему бизнесу
+            Подберём каналы и формат продвижения
           </li>
           <li className="flex gap-2">
             <span className="mt-2 h-2 w-2 rounded-full bg-blue-600" />
-            Поймём, где вы сейчас: чек, выручка, цели
-          </li>
-          <li className="flex gap-2">
-            <span className="mt-2 h-2 w-2 rounded-full bg-blue-600" />
-            Соберём план на 30–90 дней: с чего начать маркетинг
+            Сформируем цели и план на 30–90 дней
           </li>
         </ul>
 
-        <div className="mt-6 rounded-2xl border border-neutral-200 bg-[#F4F7FF] p-5 text-sm text-neutral-500">
-          Иллюстрация / превью дашборда «Кнопки»
+        <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
+          Минимум для старта: ниша и регион. Остальное — по желанию.
         </div>
       </div>
     </div>

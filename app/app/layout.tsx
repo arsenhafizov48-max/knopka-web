@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import AppSidebar from "@/app/components/AppSidebar";
@@ -12,7 +12,7 @@ const SIDEBAR_W = 280;
 const SIDEBAR_W_COLLAPSED = 88;
 const STICKY_TOP = 96;
 
-const ONBOARDING_PREFIX = "/app/onborarding";
+const ONBOARDING_PREFIX = "/app/onboarding";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -20,26 +20,25 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
 
+  const isOnboardingPage = useMemo(() => {
+    return (pathname ?? "").startsWith(ONBOARDING_PREFIX);
+  }, [pathname]);
+
   useEffect(() => {
     const saved = window.localStorage.getItem("knopka.sidebarCollapsed");
     if (saved === "1") setCollapsed(true);
   }, []);
 
+  // редирект в онбординг, если фактура не начата (но НЕ трогаем сами страницы онбординга)
   useEffect(() => {
     if (!pathname) return;
-
-    const isOnboardingPage = pathname.startsWith(ONBOARDING_PREFIX);
     if (isOnboardingPage) return;
 
     const status = getFactStatus();
-
-    // ЛОГИКА, КАК ТЫ ХОЧЕШЬ:
-    // - если вообще не начинал → в онбординг
-    // - если начал (даже не закончил) → пускаем в кабинет
     if (!status.started) {
-      router.replace("/app/onborarding/step-1");
+      router.replace("/app/onboarding/step-1");
     }
-  }, [pathname, router]);
+  }, [pathname, router, isOnboardingPage]);
 
   const toggleCollapsed = () => {
     setCollapsed((v) => {
@@ -51,28 +50,38 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-[#F4F7FF]">
+      {/* TOPBAR (оставляем всегда) */}
       <div className="sticky top-0 z-50 bg-[#F4F7FF]">
-        <div className="px-[15px] pt-6">
+        <div className="px-[15px] pt-5">
           <div className="rounded-2xl border border-neutral-200/70 bg-white/0 px-4 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-white/60">
             <AppTopbar />
           </div>
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-none gap-6 px-[15px] py-6">
-        <aside
-          className="hidden shrink-0 lg:block transition-[width] duration-200 ease-out"
-          style={{ width: collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W }}
-        >
-          <div className="sticky" style={{ top: STICKY_TOP }}>
-            <AppSidebar collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
-          </div>
-        </aside>
+      <div className="mx-auto flex w-full max-w-none gap-6 px-[15px] pb-6 pt-5">
+        {/* SIDEBAR — показываем только если НЕ онбординг */}
+        {!isOnboardingPage ? (
+          <aside
+            className="hidden shrink-0 lg:block transition-[width] duration-200 ease-out"
+            style={{ width: collapsed ? SIDEBAR_W_COLLAPSED : SIDEBAR_W }}
+          >
+            <div className="sticky" style={{ top: STICKY_TOP }}>
+              <AppSidebar collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
+            </div>
+          </aside>
+        ) : null}
 
+        {/* MAIN */}
         <main className="min-w-0 flex-1">
-          <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-[0_1px_0_rgba(16,24,40,0.04)]">
-            {children}
-          </div>
+          {/* На онбординге НЕ делаем белую обёртку-карточку — она и создаёт «полосу/рамку» */}
+          {isOnboardingPage ? (
+            <div>{children}</div>
+          ) : (
+            <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-[0_1px_0_rgba(16,24,40,0.04)]">
+              {children}
+            </div>
+          )}
         </main>
       </div>
     </div>

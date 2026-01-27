@@ -56,7 +56,7 @@ export default function Page() {
           </div>
 
           <div className="mt-4">
-            <Link href="/app/onborarding/step-1" className="text-xs text-blue-700 hover:underline">
+            <Link href="/app/onboarding/step-1" className="text-xs text-blue-700 hover:underline">
               Изменить шаг 1 →
             </Link>
           </div>
@@ -69,7 +69,7 @@ export default function Page() {
           </div>
 
           <div className="mt-4">
-            <Link href="/app/onborarding/step-2" className="text-xs text-blue-700 hover:underline">
+            <Link href="/app/onboarding/step-2" className="text-xs text-blue-700 hover:underline">
               Изменить шаг 2 →
             </Link>
           </div>
@@ -83,7 +83,7 @@ export default function Page() {
           </div>
 
           <div className="mt-4">
-            <Link href="/app/onborarding/step-3" className="text-xs text-blue-700 hover:underline">
+            <Link href="/app/onboarding/step-3" className="text-xs text-blue-700 hover:underline">
               Изменить шаг 3 →
             </Link>
           </div>
@@ -95,7 +95,7 @@ export default function Page() {
           </div>
 
           <div className="mt-4 flex items-center justify-between gap-3">
-            <Link href="/app/onborarding/step-3" className="text-xs text-neutral-600 hover:underline">
+            <Link href="/app/onboarding/step-3" className="text-xs text-neutral-600 hover:underline">
               Назад
             </Link>
 
