@@ -6,12 +6,13 @@ const FALLBACK = {
   text: "Этот раздел появится после следующего обновления.",
 };
 
-export default function WipFeaturePage({
+export default async function WipFeaturePage({
   params,
 }: {
-  params: { feature: string };
+  params: Promise<{ feature: string }>;
 }) {
-  const key = params.feature as FeatureKey;
+  const { feature } = await params;
+  const key = feature as FeatureKey;
   const meta = FEATURES[key];
 
   const title = meta?.title ?? FALLBACK.title;
