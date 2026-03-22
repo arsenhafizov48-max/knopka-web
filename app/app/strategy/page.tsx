@@ -13,6 +13,7 @@ import {
   saveStrategy,
 } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
+import { StrategyGigaChat } from "@/app/app/components/StrategyGigaChat";
 
 export default function StrategyPage() {
   const [fact, setFact] = useState<ProjectFact | null>(null);
@@ -129,6 +130,8 @@ export default function StrategyPage() {
           </div>
         </div>
       </div>
+
+      <StrategyGigaChat doc={doc} />
 
       {!gaps.ok ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5">
