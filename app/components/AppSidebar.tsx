@@ -16,7 +16,9 @@ import {
   User,
   ChevronRight,
   ChevronLeft,
+  Target,
 } from "lucide-react";
+import SidebarSignOut from "@/app/components/SidebarSignOut";
 
 type AppSidebarProps = {
   collapsed?: boolean;
@@ -41,6 +43,7 @@ export default function AppSidebar({
 
   const nav: NavItem[] = [
     { label: "Дашборд", href: "/app/dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
+    { label: "Стратегия", href: "/app/strategy", icon: <Target className="h-4 w-4" /> },
     { label: "Каналы", href: "/app/channels", icon: <Megaphone className="h-4 w-4" /> },
     { label: "Продукт и прайс", href: "/app/product", icon: <Package className="h-4 w-4" /> },
     { label: "Планы и инициативы", href: "/app/plans", icon: <ClipboardList className="h-4 w-4" /> },
@@ -152,6 +155,10 @@ export default function AppSidebar({
             <ChevronRight className="h-4 w-4 text-neutral-400" />
           </span>
         </Link>
+
+        <div className="mt-1">
+          <SidebarSignOut collapsed={collapsed} />
+        </div>
       </div>
     </div>
   );

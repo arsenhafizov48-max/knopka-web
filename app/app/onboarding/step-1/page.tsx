@@ -1,400 +1,875 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import SaveToast from "@/app/components/SaveToast";
+import OnboardingStepsNav from "@/app/components/OnboardingStepsNav";
 import {
   loadProjectFact,
   patchProjectFact,
   setLastStep,
-  toggleInArray,
-  type LegalForm,
-  type WorkFormat,
-} from "../../lib/projectFact";
+  normalizeText,
+} from "@/app/app/lib/projectFact";
 
-type Economics = {
-  product: string;
-  averageCheck: string;
-  marginPercent: string;
+type Fact = ReturnType<typeof loadProjectFact>;
+
+type GoalKey =
+  | "more_leads"
+  | "avg_check_up"
+  | "marketing_understand"
+  | "analytics_order";
+
+type Step1Draft = {
+  projectName: string;
+  niche: string;
+  geo: string;
+
+  legalForm: Fact["legalForm"];
+  workFormat: Fact["workFormat"];
+
+  averageCheckNow: string; // ОБЯЗАТЕЛЬНО
+
+  // Точка А / Б (обязательные блоки)
+  aRevenue: string;
+  aClients: string;
+  bRevenue: string;
+  bClients: string;
+
+  servicesText: string; // строкой, пушим в services[]
+
+  // цели (чекбоксы) + доп-поля
+  goals: Record<GoalKey, boolean>;
+  goal_more_leads_now: string;
+  goal_more_leads_want: string;
+
+  goal_avg_check_want: string;
+
+  goal_marketing_comment: string;
+  goal_analytics_comment: string;
 };
 
-type FactShape = any; // чтобы не упереться в типы из либы, но при этом держать обязательные поля в форме
+function onlyDigitsLike(v: string) {
+  return v.replace(/[^0-9.,\s]/g, "");
+}
 
-function normalizeFact(raw: FactShape) {
-  const economics: Economics = {
-    product: "",
-    averageCheck: "",
-    marginPercent: "",
-    ...(raw?.economics ?? {}),
-  };
+function toServicesArray(v: string) {
+  return v
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function readInitialDraft(fact: Fact): Step1Draft {
+  // текущая схема v4
+  const projectName = (fact as any)?.projectName ?? "";
+  const niche = (fact as any)?.niche ?? "";
+  const geo = (fact as any)?.geo ?? "";
+
+  const servicesText = Array.isArray((fact as any)?.services)
+    ? (fact as any).services.join(", ")
+    : "";
+
+  // средний чек: берём из economics.averageCheck (как у тебя в проектFact)
+  const avg = (fact as any)?.economics?.averageCheck ?? "";
+
+  // точка A/B
+  const a = (fact as any)?.pointA ?? {};
+  const b = (fact as any)?.pointB ?? {};
+
+  // цели
+  const goalsArr: string[] = Array.isArray((fact as any)?.goals)
+    ? (fact as any).goals
+    : [];
+  const has = (key: string) => goalsArr.includes(key);
+
+  const details = (fact as any)?.goalDetails ?? {};
 
   return {
-    legalForm: raw?.legalForm ?? ("ИП" as LegalForm),
-    niche: raw?.niche ?? "",
-    geo: raw?.geo ?? "",
-    workFormat: raw?.workFormat ?? ("Онлайн" as WorkFormat),
-    services: Array.isArray(raw?.services) ? raw.services : [],
-    revenueRange: raw?.revenueRange ?? "",
-    goals: Array.isArray(raw?.goals) ? raw.goals : [],
-    economics,
+    projectName: String(projectName),
+    niche: String(niche),
+    geo: String(geo),
+
+    legalForm: (fact as any)?.legalForm ?? "ИП",
+    workFormat: (fact as any)?.workFormat ?? "Онлайн",
+
+    averageCheckNow: String(avg),
+
+    aRevenue: String(a?.revenue ?? ""),
+    aClients: String(a?.clients ?? ""),
+    bRevenue: String(b?.revenue ?? ""),
+    bClients: String(b?.clients ?? ""),
+
+    servicesText,
+
+    goals: {
+      more_leads: has("more_leads"),
+      avg_check_up: has("avg_check_up"),
+      marketing_understand: has("marketing_understand"),
+      analytics_order: has("analytics_order"),
+    },
+    goal_more_leads_now: String(details?.moreLeadsNow ?? ""),
+    goal_more_leads_want: String(details?.moreLeadsWant ?? ""),
+
+    goal_avg_check_want: String(details?.avgCheckWant ?? ""),
+
+    goal_marketing_comment: String(details?.marketingComment ?? ""),
+    goal_analytics_comment: String(details?.analyticsComment ?? ""),
   };
 }
 
-function Pill({
-  active,
-  children,
-  onClick,
-}: {
-  active: boolean;
-  children: React.ReactNode;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "rounded-full border px-4 py-2 text-sm transition",
-        active
-          ? "border-blue-600 bg-blue-50 text-blue-700"
-          : "border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-50",
-      ].join(" ")}
-    >
-      {children}
-    </button>
-  );
+function validateDraft(d: Step1Draft) {
+  const errors: Record<string, string> = {};
+
+  // обязательные
+  if (!normalizeText(d.projectName)) errors.projectName = "Укажите название компании";
+  if (!normalizeText(d.niche)) errors.niche = "Укажите нишу / направление";
+  if (!normalizeText(d.geo)) errors.geo = "Укажите город / регион";
+
+  if (!normalizeText(d.averageCheckNow)) {
+    errors.averageCheckNow = "Укажите средний чек";
+  }
+
+  // точка А/Б обязательна
+  if (!normalizeText(d.aRevenue)) errors.aRevenue = "Укажите оборот (точка А)";
+  if (!normalizeText(d.aClients)) errors.aClients = "Укажите клиентов/продажи (точка А)";
+  if (!normalizeText(d.bRevenue)) errors.bRevenue = "Укажите оборот (точка Б)";
+  if (!normalizeText(d.bClients)) errors.bClients = "Укажите клиентов/продажи (точка Б)";
+
+  // условные обязательные
+  if (d.goals.more_leads) {
+    if (!normalizeText(d.goal_more_leads_now)) {
+      errors.goal_more_leads_now = "Заполните: сколько заявок/продаж сейчас";
+    }
+    if (!normalizeText(d.goal_more_leads_want)) {
+      errors.goal_more_leads_want = "Заполните: сколько заявок/продаж хотите";
+    }
+  }
+
+  if (d.goals.avg_check_up) {
+    // текущий чек уже обязателен — доп-поле это «хочу»
+    if (!normalizeText(d.goal_avg_check_want)) {
+      errors.goal_avg_check_want = "Заполните: какой средний чек нужен (точка Б)";
+    }
+  }
+
+  if (d.goals.marketing_understand) {
+    if (!normalizeText(d.goal_marketing_comment)) {
+      errors.goal_marketing_comment = "Опишите: что значит ‘разобраться с маркетингом’";
+    }
+  }
+
+  if (d.goals.analytics_order) {
+    if (!normalizeText(d.goal_analytics_comment)) {
+      errors.goal_analytics_comment = "Опишите: какая проблема в аналитике сейчас";
+    }
+  }
+
+  return errors;
 }
 
-function StepDots({ active }: { active: 1 | 2 | 3 | 4 }) {
-  const items = [
-    { n: 1, label: "Бизнес" },
-    { n: 2, label: "Каналы" },
-    { n: 3, label: "Системы" },
-    { n: 4, label: "Материалы" },
-  ] as const;
-
+function SmallError({ text }: { text: string }) {
   return (
-    <div className="mt-1 flex items-center gap-4 text-sm text-neutral-500">
-      {items.map((it, idx) => {
-        const isActive = it.n === active;
-        const isDone = it.n < active;
-        return (
-          <div key={it.n} className="flex items-center gap-2">
-            <span
-              className={[
-                "inline-flex h-6 w-6 items-center justify-center rounded-full border text-xs",
-                isActive
-                  ? "border-blue-600 bg-blue-600 text-white"
-                  : isDone
-                  ? "border-blue-200 bg-blue-50 text-blue-700"
-                  : "border-neutral-200 bg-white",
-              ].join(" ")}
-            >
-              {it.n}
-            </span>
-            <span className={isActive ? "text-blue-700" : ""}>{it.label}</span>
-            {idx !== items.length - 1 ? <span className="mx-1 text-neutral-300">—</span> : null}
-          </div>
-        );
-      })}
+    <div className="mt-2 inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 animate-[shake_0.25s_ease-in-out_0s_2]">
+      <span className="h-2 w-2 rounded-full bg-red-500" />
+      {text}
     </div>
   );
 }
 
 export default function Page() {
-  // ВАЖНО: не читаем localStorage в первом рендере (SSR), иначе hydration mismatch.
-  const [fact, setFact] = useState(() => normalizeFact({}));
-  const [serviceDraft, setServiceDraft] = useState("");
-  const [addingService, setAddingService] = useState(false);
+  const router = useRouter();
+
+  const [toast, setToast] = useState(false);
+  const [fact, setFact] = useState<Fact | null>(null);
+  const [draft, setDraft] = useState<Step1Draft | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const firstErrorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setLastStep(1);
+    const f = loadProjectFact();
+    setFact(f);
+    setDraft(readInitialDraft(f));
   }, []);
 
-  useEffect(() => {
-    // грузим фактуру после маунта (уже на клиенте)
-    const loaded = loadProjectFact();
-    setFact(normalizeFact(loaded));
-  }, []);
-
-  const canNext = useMemo(() => {
-    return (fact.niche?.trim()?.length ?? 0) > 0 && (fact.geo?.trim()?.length ?? 0) > 0;
-  }, [fact.niche, fact.geo]);
-
-  const setLegalForm = (v: LegalForm) => {
-    const next = { ...fact, legalForm: v };
-    setFact(next);
-    patchProjectFact({ legalForm: v });
+  const showSaved = () => {
+    setToast(true);
+    window.setTimeout(() => setToast(false), 1400);
   };
 
-  const setWorkFormat = (v: WorkFormat) => {
-    const next = { ...fact, workFormat: v };
-    setFact(next);
-    patchProjectFact({ workFormat: v });
+  const syncAverageCheckEverywhere = (nextAvg: string, d: Step1Draft) => {
+    // средний чек хранится в economics.averageCheck (в fact)
+    // а также используем его как «сейчас» для цели avg_check_up
+    return {
+      ...d,
+      averageCheckNow: nextAvg,
+    };
   };
 
-  const setField = (patch: any) => {
-    const next = normalizeFact({ ...fact, ...patch });
-    setFact(next);
-    patchProjectFact(patch);
-  };
+  const onSave = () => {
+    if (!draft) return;
 
-  const addService = () => {
-    const val = serviceDraft.trim();
-    if (!val) return;
+    const e = validateDraft(draft);
+    setErrors(e);
 
-    if ((fact.services ?? []).includes(val)) {
-      setServiceDraft("");
-      setAddingService(false);
+    if (Object.keys(e).length > 0) {
+      // маленькое предупреждение и скролл к первому
+      window.setTimeout(() => {
+        firstErrorRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 50);
       return;
     }
 
-    const nextServices = [...(fact.services ?? []), val];
-    setFact({ ...fact, services: nextServices });
-    patchProjectFact({ services: nextServices });
+    const patch: any = {
+      projectName: draft.projectName.trim(),
+      niche: draft.niche.trim(),
+      geo: draft.geo.trim(),
+      legalForm: draft.legalForm,
+      workFormat: draft.workFormat,
 
-    setServiceDraft("");
-    setAddingService(false);
+      services: toServicesArray(draft.servicesText),
+
+      economics: {
+        ...(fact as any)?.economics,
+        averageCheck: draft.averageCheckNow.trim(),
+        // то же, что список услуг — стратегия и отчёты читают economics.product
+        product: draft.servicesText.trim(),
+      },
+
+      pointA: {
+        revenue: draft.aRevenue.trim(),
+        clients: draft.aClients.trim(),
+        averageCheck: draft.averageCheckNow.trim(),
+      },
+      pointB: {
+        revenue: draft.bRevenue.trim(),
+        clients: draft.bClients.trim(),
+        averageCheck: draft.goals.avg_check_up
+          ? draft.goal_avg_check_want.trim()
+          : "",
+      },
+
+      goals: Object.entries(draft.goals)
+        .filter(([, v]) => Boolean(v))
+        .map(([k]) => k),
+
+      goalDetails: {
+        moreLeadsNow: draft.goal_more_leads_now.trim(),
+        moreLeadsWant: draft.goal_more_leads_want.trim(),
+        avgCheckWant: draft.goal_avg_check_want.trim(),
+        marketingComment: draft.goal_marketing_comment.trim(),
+        analyticsComment: draft.goal_analytics_comment.trim(),
+      },
+    };
+
+    patchProjectFact(patch);
+    setLastStep(1);
+    showSaved();
+
+    // перечитываем, чтобы правые блоки/шапка сразу обновились
+    const f2 = loadProjectFact();
+    setFact(f2);
+    setDraft(readInitialDraft(f2));
   };
 
-  const removeService = (name: string) => {
-    const nextServices = (fact.services ?? []).filter((x: string) => x !== name);
-    setFact({ ...fact, services: nextServices });
-    patchProjectFact({ services: nextServices });
+  const canGoNext = useMemo(() => {
+    if (!draft) return false;
+    const e = validateDraft(draft);
+    return Object.keys(e).length === 0;
+  }, [draft]);
+
+  const goNext = () => {
+    // требование: нельзя дальше без сохранения
+    // поэтому: сначала validate + save
+    onSave();
+    // если после onSave нет ошибок — идём дальше
+    window.setTimeout(() => {
+      const e = validateDraft(draft as Step1Draft);
+      if (Object.keys(e).length === 0) {
+        setLastStep(2);
+        router.push("/app/onboarding/step-2");
+      }
+    }, 60);
   };
 
-  const revenueOptions = ["до 300 000 ₽", "300–700 000 ₽", "700 000–1,5 млн ₽", "1,5+ млн ₽"];
+  if (!draft) {
+    return <div className="p-6 text-sm text-neutral-600">Загрузка…</div>;
+  }
 
-  const goalOptions = [
-    "Больше заявок",
-    "Увеличить выручку",
-    "Повысить средний чек",
-    "Разобраться с маркетингом",
-    "Навести порядок в аналитике",
-  ];
+  const firstError = Object.values(errors)[0];
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-      {/* LEFT */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-5">
-        <div className="text-sm text-neutral-500">Шаг 1 из 4</div>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">Расскажите о бизнесе</h1>
+    <div className="mx-auto w-full max-w-none px-0">
+      <SaveToast open={toast} />
 
-        <StepDots active={1} />
-
-        {/* меньше вертикальных отступов */}
-        <div className="mt-3 space-y-4">
-          {/* legal form */}
-          <div>
-            <div className="mb-2 text-sm text-neutral-700">Юридическая форма</div>
-            <div className="flex flex-wrap gap-2">
-              <Pill active={fact.legalForm === "ИП"} onClick={() => setLegalForm("ИП")}>
-                ИП
-              </Pill>
-              <Pill active={fact.legalForm === "ООО"} onClick={() => setLegalForm("ООО")}>
-                ООО
-              </Pill>
-              <Pill active={fact.legalForm === "Самозанятый"} onClick={() => setLegalForm("Самозанятый")}>
-                Самозанятый
-              </Pill>
-              <Pill active={fact.legalForm === "Другое"} onClick={() => setLegalForm("Другое")}>
-                Другое
-              </Pill>
+      <div className="mx-auto grid w-full max-w-[1200px] grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* LEFT */}
+        <div className="lg:col-span-2">
+          <div className="rounded-2xl border border-neutral-200 bg-white p-6">
+            <div className="text-xs text-neutral-500">Шаг 1 из 4</div>
+            <div className="mt-1 text-2xl font-semibold">Бизнес</div>
+            <div className="mt-3">
+              <OnboardingStepsNav currentStep={1} />
             </div>
-          </div>
 
-          {/* niche */}
-          <div>
-            <div className="mb-2 text-sm text-neutral-700">Ниша / направление</div>
-            <input
-              value={fact.niche}
-              onChange={(e) => setField({ niche: e.target.value })}
-              className="w-full max-w-[680px] rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
-              placeholder="Например: салон красоты, стоматология, онлайн-курсы"
-            />
-          </div>
+            {firstError ? (
+              <div ref={firstErrorRef} className="mt-4">
+                <SmallError text={firstError} />
+              </div>
+            ) : (
+              <div ref={firstErrorRef} />
+            )}
 
-          {/* geo */}
-          <div>
-            <div className="mb-2 text-sm text-neutral-700">Город / регион</div>
-            <input
-              value={fact.geo}
-              onChange={(e) => setField({ geo: e.target.value })}
-              className="w-full max-w-[680px] rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
-              placeholder="Например: Казань"
-            />
-          </div>
+            {/* FORM */}
+            <div className="mt-6 space-y-6">
+              {/* цель (общая) */}
+              <div>
+                <div className="text-sm font-medium text-neutral-900">Цель</div>
+                <textarea
+                  value={(fact as any)?.goal ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setFact((prev) => ({ ...(prev as any), goal: v }));
+                    // цель сохраняем вместе
+                    patchProjectFact({ goal: v } as any);
+                  }}
+                  rows={3}
+                  className="mt-2 w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-neutral-300"
+                  placeholder="Например: увеличить заявки и выручку за 3–6 месяцев"
+                />
+              </div>
 
-          {/* work format */}
-          <div>
-            <div className="mb-2 text-sm text-neutral-700">Формат работы</div>
-            <div className="flex flex-wrap gap-2">
-              <Pill active={fact.workFormat === "Онлайн"} onClick={() => setWorkFormat("Онлайн")}>
-                Онлайн
-              </Pill>
-              <Pill active={fact.workFormat === "Офлайн"} onClick={() => setWorkFormat("Офлайн")}>
-                Офлайн
-              </Pill>
-              <Pill active={fact.workFormat === "Смешанный"} onClick={() => setWorkFormat("Смешанный")}>
-                Смешанный
-              </Pill>
-            </div>
-          </div>
-
-          {/* avg check */}
-          <div>
-            <div className="mb-2 text-sm text-neutral-700">Средний чек (в ₽)</div>
-            <input
-              value={(fact.economics?.averageCheck ?? "") as string}
-              onChange={(e) =>
-                setField({
-                  economics: {
-                    ...(fact.economics as Economics),
-                    averageCheck: e.target.value,
-                  },
-                })
-              }
-              className="w-full max-w-[260px] rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm"
-              placeholder="Например: 7 000"
-            />
-          </div>
-
-          {/* services tags */}
-          <div>
-            <div className="mb-2 text-sm text-neutral-700">Основные услуги / продукты</div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {(fact.services ?? []).map((s: string) => (
-                <span
-                  key={s}
-                  className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm text-blue-700"
-                >
-                  {s}
-                  <button type="button" className="text-blue-700/70 hover:text-blue-900" onClick={() => removeService(s)}>
-                    ×
-                  </button>
-                </span>
-              ))}
-
-              {!addingService ? (
-                <button
-                  type="button"
-                  onClick={() => setAddingService(true)}
-                  className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-sm text-neutral-600 hover:bg-neutral-50"
-                >
-                  + Добавить
-                </button>
-              ) : (
-                <div className="flex items-center gap-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-sm font-medium text-neutral-900">
+                    Название компании
+                  </div>
                   <input
-                    value={serviceDraft}
-                    onChange={(e) => setServiceDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") addService();
-                      if (e.key === "Escape") {
-                        setAddingService(false);
-                        setServiceDraft("");
-                      }
-                    }}
-                    className="w-[220px] rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm"
-                    placeholder="Например: Маникюр"
-                    autoFocus
+                    value={draft.projectName}
+                    onChange={(e) =>
+                      setDraft({ ...draft, projectName: e.target.value })
+                    }
+                    className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                      errors.projectName
+                        ? "border-red-300 bg-red-50"
+                        : "border-neutral-200 bg-white focus:border-neutral-300"
+                    }`}
+                    placeholder="Например: METLAB"
                   />
-                  <button
-                    type="button"
-                    onClick={addService}
-                    className="rounded-xl bg-neutral-900 px-3 py-2 text-sm font-semibold text-white hover:bg-neutral-800"
-                  >
-                    Ок
-                  </button>
                 </div>
-              )}
-            </div>
-          </div>
 
-          {/* revenue range */}
-          <div>
-            <div className="mb-2 text-sm text-neutral-700">Примерная месячная выручка</div>
-            <div className="flex flex-wrap gap-2">
-              {revenueOptions.map((opt) => (
-                <Pill key={opt} active={fact.revenueRange === opt} onClick={() => setField({ revenueRange: opt })}>
-                  {opt}
-                </Pill>
-              ))}
-            </div>
-          </div>
+                <div>
+                  <div className="text-sm font-medium text-neutral-900">
+                    Ниша / направление
+                  </div>
+                  <input
+                    value={draft.niche}
+                    onChange={(e) => setDraft({ ...draft, niche: e.target.value })}
+                    className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                      errors.niche
+                        ? "border-red-300 bg-red-50"
+                        : "border-neutral-200 bg-white focus:border-neutral-300"
+                    }`}
+                    placeholder="Например: маркетинговое агентство"
+                  />
+                </div>
 
-          {/* goals */}
-          <div>
-            <div className="mb-2 text-sm text-neutral-700">Цели на ближайшие 3–6 месяцев</div>
-            <div className="space-y-2">
-              {goalOptions.map((g) => {
-                const checked = (fact.goals ?? []).includes(g);
-                return (
-                  <label key={g} className="flex cursor-pointer items-center gap-3 text-sm text-neutral-700">
+                <div>
+                  <div className="text-sm font-medium text-neutral-900">
+                    Город / регион
+                  </div>
+                  <input
+                    value={draft.geo}
+                    onChange={(e) => setDraft({ ...draft, geo: e.target.value })}
+                    className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                      errors.geo
+                        ? "border-red-300 bg-red-50"
+                        : "border-neutral-200 bg-white focus:border-neutral-300"
+                    }`}
+                    placeholder="Например: Казань"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-sm font-medium text-neutral-900">Форма</div>
+                  <select
+                    value={draft.legalForm}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        legalForm: e.target.value as any,
+                      })
+                    }
+                    className="mt-2 w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-neutral-300"
+                  >
+                    <option value="ИП">ИП</option>
+                    <option value="ООО">ООО</option>
+                    <option value="Самозанятый">Самозанятый</option>
+                    <option value="Другое">Другое</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* формат */}
+              <div>
+                <div className="text-sm font-medium text-neutral-900">Формат работы</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(["Онлайн", "Офлайн", "Смешанный"] as const).map((x) => {
+                    const active = draft.workFormat === x;
+                    return (
+                      <button
+                        key={x}
+                        type="button"
+                        onClick={() => setDraft({ ...draft, workFormat: x })}
+                        className={`rounded-full border px-4 py-2 text-sm ${
+                          active
+                            ? "border-blue-600 bg-blue-50 text-blue-700"
+                            : "border-neutral-200 bg-white text-neutral-800 hover:bg-neutral-50"
+                        }`}
+                      >
+                        {x}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* средний чек (обязательный) */}
+              <div>
+                <div className="text-sm font-medium text-neutral-900">
+                  Средний чек (₽)
+                </div>
+                <input
+                  value={draft.averageCheckNow}
+                  onChange={(e) => {
+                    const v = onlyDigitsLike(e.target.value);
+                    setDraft(syncAverageCheckEverywhere(v, { ...draft, averageCheckNow: v }));
+                  }}
+                  className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                    errors.averageCheckNow
+                      ? "border-red-300 bg-red-50"
+                      : "border-neutral-200 bg-white focus:border-neutral-300"
+                  }`}
+                  placeholder="Например: 7 000"
+                />
+              </div>
+
+              {/* услуги */}
+              <div>
+                <div className="text-sm font-medium text-neutral-900">
+                  Основные услуги / продукты
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    value={draft.servicesText}
+                    onChange={(e) =>
+                      setDraft({ ...draft, servicesText: e.target.value })
+                    }
+                    className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-neutral-300"
+                    placeholder="Например: маникюр, стрижки, окрашивание"
+                  />
+                </div>
+                <div className="mt-2 text-xs text-neutral-500">
+                  Перечислите через запятую.
+                </div>
+              </div>
+
+              {/* точка А и точка Б */}
+              <div className="rounded-2xl border border-neutral-200 bg-neutral-50 p-5">
+                <div className="text-sm font-semibold text-neutral-900">
+                  Точка А и точка Б
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+                    <div className="text-sm font-medium">Сейчас (точка А)</div>
+
+                    <div className="mt-3">
+                      <div className="text-xs text-neutral-600">Оборот в месяц (₽)</div>
+                      <input
+                        value={draft.aRevenue}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            aRevenue: onlyDigitsLike(e.target.value),
+                          })
+                        }
+                        className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                          errors.aRevenue
+                            ? "border-red-300 bg-red-50"
+                            : "border-neutral-200 bg-white focus:border-neutral-300"
+                        }`}
+                        placeholder="Например: 500 000"
+                      />
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-xs text-neutral-600">
+                        Клиенты / продажи в месяц
+                      </div>
+                      <input
+                        value={draft.aClients}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            aClients: onlyDigitsLike(e.target.value),
+                          })
+                        }
+                        className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                          errors.aClients
+                            ? "border-red-300 bg-red-50"
+                            : "border-neutral-200 bg-white focus:border-neutral-300"
+                        }`}
+                        placeholder="Например: 40"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+                    <div className="text-sm font-medium">Хочу (точка Б)</div>
+
+                    <div className="mt-3">
+                      <div className="text-xs text-neutral-600">Оборот в месяц (₽)</div>
+                      <input
+                        value={draft.bRevenue}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            bRevenue: onlyDigitsLike(e.target.value),
+                          })
+                        }
+                        className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                          errors.bRevenue
+                            ? "border-red-300 bg-red-50"
+                            : "border-neutral-200 bg-white focus:border-neutral-300"
+                        }`}
+                        placeholder="Например: 1 500 000"
+                      />
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-xs text-neutral-600">
+                        Клиенты / продажи в месяц
+                      </div>
+                      <input
+                        value={draft.bClients}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            bClients: onlyDigitsLike(e.target.value),
+                          })
+                        }
+                        className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                          errors.bClients
+                            ? "border-red-300 bg-red-50"
+                            : "border-neutral-200 bg-white focus:border-neutral-300"
+                        }`}
+                        placeholder="Например: 120"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 text-xs text-neutral-600">
+                  Эти поля нужны, чтобы «Кнопка» показывала динамику и путь от текущих цифр к желаемым.
+                </div>
+              </div>
+
+              {/* цели (чекбоксы) */}
+              <div>
+                <div className="text-sm font-semibold text-neutral-900">
+                  Цели на ближайшие 3–6 месяцев
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  {/* Больше заявок */}
+                  <label className="flex items-start gap-3">
                     <input
                       type="checkbox"
-                      checked={checked}
-                      onChange={() => {
-                        const next = toggleInArray(fact.goals ?? [], g);
-                        setFact({ ...fact, goals: next });
-                        patchProjectFact({ goals: next });
-                      }}
-                      className="h-4 w-4 rounded border-neutral-300"
+                      checked={draft.goals.more_leads}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          goals: { ...draft.goals, more_leads: e.target.checked },
+                        })
+                      }
+                      className="mt-1"
                     />
-                    {g}
+                    <div className="flex-1">
+                      <div className="text-sm text-neutral-900">Больше заявок</div>
+                      {draft.goals.more_leads ? (
+                        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div>
+                            <div className="text-xs text-neutral-600">
+                              Сколько сейчас (в месяц)
+                            </div>
+                            <input
+                              value={draft.goal_more_leads_now}
+                              onChange={(e) =>
+                                setDraft({
+                                  ...draft,
+                                  goal_more_leads_now: onlyDigitsLike(e.target.value),
+                                })
+                              }
+                              className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                                errors.goal_more_leads_now
+                                  ? "border-red-300 bg-red-50"
+                                  : "border-neutral-200 bg-white focus:border-neutral-300"
+                              }`}
+                              placeholder="Например: 40"
+                            />
+                          </div>
+                          <div>
+                            <div className="text-xs text-neutral-600">
+                              Сколько хотите (в месяц)
+                            </div>
+                            <input
+                              value={draft.goal_more_leads_want}
+                              onChange={(e) =>
+                                setDraft({
+                                  ...draft,
+                                  goal_more_leads_want: onlyDigitsLike(e.target.value),
+                                })
+                              }
+                              className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                                errors.goal_more_leads_want
+                                  ? "border-red-300 bg-red-50"
+                                  : "border-neutral-200 bg-white focus:border-neutral-300"
+                              }`}
+                              placeholder="Например: 120"
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   </label>
-                );
-              })}
+
+                  {/* Повысить средний чек */}
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={draft.goals.avg_check_up}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          goals: { ...draft.goals, avg_check_up: e.target.checked },
+                        })
+                      }
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm text-neutral-900">
+                        Повысить средний чек
+                      </div>
+
+                      {draft.goals.avg_check_up ? (
+                        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          <div>
+                            <div className="text-xs text-neutral-600">
+                              Сейчас (подтягивается)
+                            </div>
+                            <input
+                              value={draft.averageCheckNow}
+                              onChange={(e) => {
+                                const v = onlyDigitsLike(e.target.value);
+                                setDraft(syncAverageCheckEverywhere(v, { ...draft, averageCheckNow: v }));
+                              }}
+                              className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                                errors.averageCheckNow
+                                  ? "border-red-300 bg-red-50"
+                                  : "border-neutral-200 bg-white focus:border-neutral-300"
+                              }`}
+                              placeholder="Например: 7 000"
+                            />
+                          </div>
+                          <div>
+                            <div className="text-xs text-neutral-600">
+                              Хочу (точка Б)
+                            </div>
+                            <input
+                              value={draft.goal_avg_check_want}
+                              onChange={(e) =>
+                                setDraft({
+                                  ...draft,
+                                  goal_avg_check_want: onlyDigitsLike(e.target.value),
+                                })
+                              }
+                              className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                                errors.goal_avg_check_want
+                                  ? "border-red-300 bg-red-50"
+                                  : "border-neutral-200 bg-white focus:border-neutral-300"
+                              }`}
+                              placeholder="Например: 12 000"
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </label>
+
+                  {/* Разобраться с маркетингом */}
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={draft.goals.marketing_understand}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          goals: {
+                            ...draft.goals,
+                            marketing_understand: e.target.checked,
+                          },
+                        })
+                      }
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm text-neutral-900">
+                        Разобраться с маркетингом
+                      </div>
+                      {draft.goals.marketing_understand ? (
+                        <div className="mt-2">
+                          <div className="text-xs text-neutral-600">
+                            Опишите проблему и что хотите получить
+                          </div>
+                          <textarea
+                            value={draft.goal_marketing_comment}
+                            onChange={(e) =>
+                              setDraft({
+                                ...draft,
+                                goal_marketing_comment: e.target.value,
+                              })
+                            }
+                            rows={4}
+                            className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                              errors.goal_marketing_comment
+                                ? "border-red-300 bg-red-50"
+                                : "border-neutral-200 bg-white focus:border-neutral-300"
+                            }`}
+                            placeholder="Например: нет системного привлечения, не понимаю какие каналы дают результат…"
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  </label>
+
+                  {/* Аналитика */}
+                  <label className="flex items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={draft.goals.analytics_order}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          goals: {
+                            ...draft.goals,
+                            analytics_order: e.target.checked,
+                          },
+                        })
+                      }
+                      className="mt-1"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm text-neutral-900">
+                        Навести порядок в аналитике
+                      </div>
+                      {draft.goals.analytics_order ? (
+                        <div className="mt-2">
+                          <div className="text-xs text-neutral-600">
+                            Опишите, что сейчас не так
+                          </div>
+                          <textarea
+                            value={draft.goal_analytics_comment}
+                            onChange={(e) =>
+                              setDraft({
+                                ...draft,
+                                goal_analytics_comment: e.target.value,
+                              })
+                            }
+                            rows={4}
+                            className={`mt-2 w-full rounded-2xl border px-4 py-3 text-sm outline-none ${
+                              errors.goal_analytics_comment
+                                ? "border-red-300 bg-red-50"
+                                : "border-neutral-200 bg-white focus:border-neutral-300"
+                            }`}
+                            placeholder="Например: нет метки, не понимаю откуда заявки, нет сквозной…"
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* footer */}
+            <div className="mt-8 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => router.push("/app/onboarding/step-1")}
+                className="rounded-full border border-neutral-200 bg-white px-5 py-2 text-sm hover:bg-neutral-50"
+              >
+                Назад
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onSave}
+                  className="rounded-full border border-neutral-200 bg-white px-5 py-2 text-sm hover:bg-neutral-50"
+                >
+                  Сохранить
+                </button>
+
+                <button
+                  type="button"
+                  onClick={goNext}
+                  className={`rounded-full px-5 py-2 text-sm font-medium text-white ${
+                    canGoNext ? "bg-blue-600 hover:bg-blue-700" : "bg-blue-600/40"
+                  }`}
+                >
+                  Далее: каналы
+                </button>
+              </div>
             </div>
           </div>
+        </div>
 
-          {/* footer */}
-          <div className="flex items-center justify-between pt-2">
-            <Link
-              href="/app/dashboard"
-              className="rounded-full border border-neutral-200 bg-white px-5 py-2.5 text-sm text-neutral-700 hover:bg-neutral-50"
-            >
-              Назад
-            </Link>
+        {/* RIGHT */}
+        <div className="lg:col-span-1">
+          <div className="rounded-2xl border border-neutral-200 bg-white p-6 self-start">
+            <div className="text-lg font-semibold">Что важно</div>
+            <div className="mt-3 space-y-3 text-sm text-neutral-600">
+              <p>
+                Это базовая карточка бизнеса — она влияет на рекомендации,
+                приоритеты и подсказки.
+              </p>
+              <p>
+                Обязательные поля: название, ниша, регион, средний чек и блок
+                «Точка А → Точка Б».
+              </p>
+            </div>
 
-            <Link
-              href={canNext ? "/app/onboarding/step-2" : "#"}
-              onClick={(e) => {
-                if (!canNext) e.preventDefault();
-              }}
-              className={[
-                "rounded-full px-6 py-2.5 text-sm font-semibold",
-                canNext ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-neutral-200 text-neutral-500",
-              ].join(" ")}
-            >
-              Далее: каналы и системы
-            </Link>
+            <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700">
+              Подсказка: если отметили цель — заполните поле под ней, иначе
+              сохранить не получится.
+            </div>
           </div>
         </div>
       </div>
 
-      {/* RIGHT (короче, без огромных блоков) */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-5 self-start">
-        <h2 className="text-xl font-semibold tracking-tight">Зачем эти вопросы</h2>
-        <p className="mt-2 text-sm text-neutral-600">
-          Мы соберём профиль бизнеса и подстроим рекомендации под вашу ситуацию.
-        </p>
-
-        <ul className="mt-4 space-y-2 text-sm text-neutral-700">
-          <li className="flex gap-2">
-            <span className="mt-2 h-2 w-2 rounded-full bg-blue-600" />
-            Подберём каналы и формат продвижения
-          </li>
-          <li className="flex gap-2">
-            <span className="mt-2 h-2 w-2 rounded-full bg-blue-600" />
-            Сформируем цели и план на 30–90 дней
-          </li>
-        </ul>
-
-        <div className="mt-4 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">
-          Минимум для старта: ниша и регион. Остальное — по желанию.
-        </div>
-      </div>
+      <style jsx global>{`
+        @keyframes shake {
+          0% { transform: translateX(0); }
+          25% { transform: translateX(-2px); }
+          50% { transform: translateX(2px); }
+          75% { transform: translateX(-2px); }
+          100% { transform: translateX(0); }
+        }
+      `}</style>
     </div>
   );
 }

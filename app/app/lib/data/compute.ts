@@ -17,6 +17,13 @@ export type SumTotals = {
   sales: number;
   spend: number;
   revenue: number;
+  calls: number;
+  messages: number;
+  otherExpenses: number;
+  funnelNewLeads: number;
+  funnelQualified: number;
+  funnelInProgress: number;
+  funnelClosedWon: number;
 };
 
 export type DerivedTotals = {
@@ -130,7 +137,31 @@ function sumEntry(entry: DailyEntryV2): SumTotals {
   const sales = entry.sales?.sales || 0;
   const revenue = entry.sales?.revenue || 0;
 
-  return { impressions, clicks, leads, sql, sales, spend, revenue };
+  const calls = entry.outreach?.calls || 0;
+  const messages = entry.outreach?.messages || 0;
+  const otherExpenses = entry.outreach?.otherExpenses || 0;
+
+  const funnelNewLeads = entry.funnel?.newLeads || 0;
+  const funnelQualified = entry.funnel?.qualified || 0;
+  const funnelInProgress = entry.funnel?.inProgress || 0;
+  const funnelClosedWon = entry.funnel?.closedWon || 0;
+
+  return {
+    impressions,
+    clicks,
+    leads,
+    sql,
+    sales,
+    spend,
+    revenue,
+    calls,
+    messages,
+    otherExpenses,
+    funnelNewLeads,
+    funnelQualified,
+    funnelInProgress,
+    funnelClosedWon,
+  };
 }
 
 function sumRange(from: string, to: string): Snapshot {
@@ -143,6 +174,13 @@ function sumRange(from: string, to: string): Snapshot {
     sales: 0,
     spend: 0,
     revenue: 0,
+    calls: 0,
+    messages: 0,
+    otherExpenses: 0,
+    funnelNewLeads: 0,
+    funnelQualified: 0,
+    funnelInProgress: 0,
+    funnelClosedWon: 0,
   };
 
   for (const e of all) {
@@ -157,6 +195,13 @@ function sumRange(from: string, to: string): Snapshot {
     total.sales += s.sales;
     total.spend += s.spend;
     total.revenue += s.revenue;
+    total.calls += s.calls;
+    total.messages += s.messages;
+    total.otherExpenses += s.otherExpenses;
+    total.funnelNewLeads += s.funnelNewLeads;
+    total.funnelQualified += s.funnelQualified;
+    total.funnelInProgress += s.funnelInProgress;
+    total.funnelClosedWon += s.funnelClosedWon;
   }
 
   return { sum: total, derived: derived(total) };
@@ -211,6 +256,17 @@ export function buildSnapshot(range: PeriodRange) {
   const current = sumRange(range.from, range.to);
   const previous = sumRange(range.prevFrom, range.prevTo);
   return { range, current, previous };
+}
+
+/** Последние `days` календарных дней включительно (сегодня = последний день) + предыдущее окно той же длины */
+export function getRollingPeriodLastDays(days: number): PeriodRange {
+  const today = toISO(new Date());
+  const to = today;
+  const from = addDays(to, -(days - 1));
+  const len = daysBetweenInclusive(from, to);
+  const prevTo = addDays(from, -1);
+  const prevFrom = addDays(prevTo, -(len - 1));
+  return { from, to, prevFrom, prevTo };
 }
 
 export function deltaPercent(current: number | null, previous: number | null) {

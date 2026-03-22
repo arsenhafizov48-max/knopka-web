@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
+import { withBasePath } from "@/app/lib/publicBasePath";
+
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const origin = url.origin;
@@ -10,13 +12,13 @@ export async function GET(request: Request) {
   const errorDescription = url.searchParams.get("error_description");
   if (error) {
     return NextResponse.redirect(
-      `${origin}/login?error=${encodeURIComponent(errorDescription || error)}`
+      `${origin}${withBasePath(`/login?error=${encodeURIComponent(errorDescription || error)}`)}`
     );
   }
 
   const code = url.searchParams.get("code");
   if (!code) {
-    return NextResponse.redirect(`${origin}/login?error=no_code`);
+    return NextResponse.redirect(`${origin}${withBasePath("/login?error=no_code")}`);
   }
 
   const cookieStore = await cookies();
@@ -44,10 +46,10 @@ export async function GET(request: Request) {
 
   if (exchangeError) {
     return NextResponse.redirect(
-      `${origin}/login?error=${encodeURIComponent(exchangeError.message)}`
+      `${origin}${withBasePath(`/login?error=${encodeURIComponent(exchangeError.message)}`)}`
     );
   }
 
-  return NextResponse.redirect(`${origin}/demo`);
+  return NextResponse.redirect(`${origin}${withBasePath("/app/dashboard")}`);
 
 }

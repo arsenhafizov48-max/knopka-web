@@ -25,16 +25,35 @@ export type SalesMetrics = {
   revenue: number;
 };
 
+/** Звонки, переписка, прочие расходы вне рекламных каналов */
+export type OutreachMetrics = {
+  calls: number;
+  messages: number;
+  otherExpenses: number;
+};
+
+/** Этапы воронки продаж за день (ручной ввод) */
+export type FunnelMetrics = {
+  newLeads: number;
+  qualified: number;
+  inProgress: number;
+  closedWon: number;
+};
+
 export type DailyEntryV2 = {
   date: string; // YYYY-MM-DD
   channels: DailyChannelMetrics[];
   site?: SiteMetrics;
   sales?: SalesMetrics;
+  outreach?: OutreachMetrics;
+  funnel?: FunnelMetrics;
+  /** Заметки к дню */
+  notes?: string;
 };
 
-const KEY_DAILY_V2 = "knopka.data.daily.v2";
+export const KEY_DAILY_V2 = "knopka.data.daily.v2";
 const KEY_DAILY_V1 = "knopka.data.daily.v1";
-const KEY_CHANNELS = "knopka.data.channels.v1";
+export const KEY_DATA_CHANNELS = "knopka.data.channels.v1";
 
 const DEFAULT_CHANNELS: ChannelDef[] = [
   { id: "avito", title: "Авито" },
@@ -77,7 +96,7 @@ function slugify(input: string) {
 export function listChannels(): ChannelDef[] {
   if (!isBrowser()) return DEFAULT_CHANNELS;
 
-  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_CHANNELS), []);
+  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_DATA_CHANNELS), []);
   const merged = [...DEFAULT_CHANNELS];
 
   for (const c of custom) {
@@ -104,10 +123,10 @@ export function addCustomChannel(title: string): ChannelDef | null {
     id = `${id}-${i}`;
   }
 
-  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_CHANNELS), []);
+  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_DATA_CHANNELS), []);
   const ch: ChannelDef = { id, title: t, isCustom: true };
   custom.push(ch);
-  localStorage.setItem(KEY_CHANNELS, JSON.stringify(custom));
+  localStorage.setItem(KEY_DATA_CHANNELS, JSON.stringify(custom));
 
   return ch;
 }
@@ -115,9 +134,9 @@ export function addCustomChannel(title: string): ChannelDef | null {
 export function removeCustomChannel(id: string) {
   if (!isBrowser()) return;
 
-  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_CHANNELS), []);
+  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_DATA_CHANNELS), []);
   const next = custom.filter((c) => c.id !== id);
-  localStorage.setItem(KEY_CHANNELS, JSON.stringify(next));
+  localStorage.setItem(KEY_DATA_CHANNELS, JSON.stringify(next));
 }
 
 function migrateV1toV2(): DailyEntryV2[] {
@@ -155,9 +174,9 @@ function migrateV1toV2(): DailyEntryV2[] {
   // добавим канал "Общий" в кастомные, чтобы он нормально отображался
   const channels = listChannels();
   if (!channels.some((c) => c.id === "total")) {
-    const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_CHANNELS), []);
+    const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_DATA_CHANNELS), []);
     custom.push({ id: "total", title: "Общий", isCustom: true });
-    localStorage.setItem(KEY_CHANNELS, JSON.stringify(custom));
+    localStorage.setItem(KEY_DATA_CHANNELS, JSON.stringify(custom));
   }
 
   localStorage.setItem(KEY_DAILY_V2, JSON.stringify(migrated));
@@ -188,6 +207,7 @@ export function upsertDaily(entry: DailyEntryV2) {
   const next = all.filter((x) => x.date !== entry.date);
   next.unshift(entry);
   localStorage.setItem(KEY_DAILY_V2, JSON.stringify(next));
+  window.dispatchEvent(new Event("knopka:dailyDataUpdated"));
 }
 
 export function deleteDaily(date: string) {
@@ -196,7 +216,7 @@ export function deleteDaily(date: string) {
   const next = all.filter((x) => x.date !== date);
   localStorage.setItem(KEY_DAILY_V2, JSON.stringify(next));
 }
-const KEY_HIDDEN_CHANNELS = "knopka.data.channels.hidden.v1";
+export const KEY_HIDDEN_CHANNELS = "knopka.data.channels.hidden.v1";
 
 export function listHiddenChannelIds(): string[] {
   if (!isBrowser()) return [];

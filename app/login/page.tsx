@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getSupabaseBrowserClient } from "@/app/lib/supabaseClient";
+import { withBasePath } from "@/app/lib/publicBasePath";
 
 function GoogleIcon() {
   return (
@@ -84,7 +85,7 @@ export default function LoginPage() {
     setInfoText(null);
     setLoading(true);
     try {
-      const redirectTo = `${window.location.origin}/auth/callback`;
+      const redirectTo = `${window.location.origin}${withBasePath("/auth/callback")}`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: { redirectTo },
@@ -110,7 +111,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       if (mode === "email") {
-        const emailRedirectTo = `${window.location.origin}/auth/callback`;
+        const emailRedirectTo = `${window.location.origin}${withBasePath("/auth/callback")}`;
 
         const { error } = await supabase.auth.signInWithOtp({
           email: cleanEmail,

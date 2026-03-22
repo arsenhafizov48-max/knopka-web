@@ -1,49 +1,46 @@
-// app/app/channels/page.tsx
+"use client";
+
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Megaphone,
-  Search,
-  Filter,
   ArrowUpRight,
-  Clock,
   CircleDollarSign,
+  Link as LinkIcon,
+  Search,
   Users,
-  TrendingUp,
-  AlertTriangle,
 } from "lucide-react";
 
-type ChannelStatus = "active" | "paused" | "draft" | "needs_data";
+import { loadProjectFact } from "@/app/app/lib/projectFact";
 
-function StatusPill({ status }: { status: ChannelStatus }) {
-  const map: Record<ChannelStatus, { text: string; cls: string }> = {
-    active: {
-      text: "Активен",
-      cls: "border-green-200 bg-green-50 text-green-700",
-    },
-    paused: {
-      text: "На паузе",
-      cls: "border-neutral-200 bg-neutral-50 text-neutral-700",
-    },
-    draft: {
-      text: "Черновик",
-      cls: "border-amber-200 bg-amber-50 text-amber-700",
-    },
-    needs_data: {
-      text: "Нужны данные",
-      cls: "border-rose-200 bg-rose-50 text-rose-700",
-    },
-  };
+type Fact = ReturnType<typeof loadProjectFact>;
 
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${map[status].cls}`}
-    >
-      {map[status].text}
-    </span>
-  );
+function toNumber(v: unknown): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v.replace(/\s/g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
 }
 
-function MiniKpi({
+function money(n: number): string {
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
+}
+
+function isFilledText(v: unknown) {
+  return typeof v === "string" && v.trim().length > 0;
+}
+
+function normalizeUrl(v: string) {
+  const s = v.trim();
+  if (!s) return "";
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  // если человек вставил @username или t.me/..., не ломаем
+  if (s.startsWith("@") || s.includes("t.me/") || s.includes("vk.com/")) return s;
+  return s;
+}
+
+function MiniCard({
   icon,
   label,
   value,
@@ -68,340 +65,355 @@ function MiniKpi({
   );
 }
 
-function Row({
-  name,
-  type,
-  status,
-  leads,
-  spend,
-  cpl,
-  roi,
-  updated,
-  owner,
-  note,
+function EmptyBlock({
+  title,
+  text,
 }: {
-  name: string;
-  type: string;
-  status: ChannelStatus;
-  leads: string;
-  spend: string;
-  cpl: string;
-  roi: string;
-  updated: string;
-  owner: string;
-  note: string;
+  title: string;
+  text: string;
 }) {
   return (
-    <div className="grid grid-cols-[1.2fr_0.8fr_0.7fr_0.7fr_0.7fr_0.7fr_0.7fr] items-center gap-3 px-4 py-3 text-sm">
-      <div className="min-w-0">
-        <div className="flex items-center gap-2">
-          <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-neutral-200 bg-neutral-50">
-            <Megaphone className="h-4 w-4" />
-          </div>
-          <div className="min-w-0">
-            <div className="truncate font-medium">{name}</div>
-            <div className="truncate text-xs text-neutral-500">{type}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center">
-        <StatusPill status={status} />
-      </div>
-
-      <div className="text-neutral-700">{leads}</div>
-      <div className="text-neutral-700">{spend}</div>
-      <div className="text-neutral-700">{cpl}</div>
-      <div className="text-neutral-700">{roi}</div>
-
-      <div className="min-w-0 text-right">
-        <div className="text-xs text-neutral-500">{updated}</div>
-        <div className="truncate text-xs text-neutral-500">{owner}</div>
-        <div className="truncate text-xs text-neutral-500">{note}</div>
+    <div className="rounded-2xl border border-neutral-200 bg-white p-5">
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-1 text-sm text-neutral-600">{text}</div>
+      <div className="mt-4">
+        <Link
+          href="/app/fact"
+          className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+        >
+          Открыть фактуру <ArrowUpRight className="h-4 w-4" />
+        </Link>
       </div>
     </div>
   );
 }
 
-export default function Page() {
-  const channels = [
-    {
-      name: "Яндекс.Директ (поиск)",
-      type: "Платный трафик → заявки",
-      status: "active" as const,
-      leads: "118",
-      spend: "420 000 ₽",
-      cpl: "3 560 ₽",
-      roi: "1.6",
-      updated: "Обновлено: 2 часа назад",
-      owner: "Ответственный: маркетинг",
-      note: "Есть риск: CPL растёт",
-    },
-    {
-      name: "Яндекс.Директ (РСЯ)",
-      type: "Платный трафик → прогрев",
-      status: "paused" as const,
-      leads: "42",
-      spend: "120 000 ₽",
-      cpl: "2 860 ₽",
-      roi: "1.1",
-      updated: "Обновлено: 3 дня назад",
-      owner: "Ответственный: маркетинг",
-      note: "Пауза: пересборка креативов",
-    },
-    {
-      name: "SEO / органика",
-      type: "Поисковый трафик → заявки",
-      status: "needs_data" as const,
-      leads: "—",
-      spend: "—",
-      cpl: "—",
-      roi: "—",
-      updated: "Нет данных",
-      owner: "Ответственный: подрядчик",
-      note: "Нужно подключить GSC",
-    },
-    {
-      name: "Авито",
-      type: "Площадка → лиды/звонки",
-      status: "draft" as const,
-      leads: "—",
-      spend: "—",
-      cpl: "—",
-      roi: "—",
-      updated: "Черновик",
-      owner: "Ответственный: продажи",
-      note: "Нужно настроить цели/CRM",
-    },
-  ];
+export default function ChannelsPage() {
+  const [fact, setFact] = useState<Fact | null>(null);
+  const [q, setQ] = useState("");
 
-  const aiSummary = [
-    "Платный трафик даёт лиды, но CPL нестабилен — часть бюджета уходит в «пустые клики».",
-    "Органика видна частично: без Search Console провалы в запросах не ловятся.",
-    "Авито не связывается со сделками — ИИ не может посчитать реальную стоимость продажи.",
-  ];
+  useEffect(() => {
+    const read = () => setFact(loadProjectFact());
 
-  const aiAlerts = [
-    {
-      title: "CPL в Директе растёт",
-      text: "В 5 из 7 дней CPL выше целевого.",
-      tone: "bad",
-    },
-    {
-      title: "Нет данных по SEO",
-      text: "Подключите Search Console для полной картины.",
-      tone: "warn",
-    },
-    {
-      title: "Неполная связка лид → сделка",
-      text: "CRM получает заявки, но источник теряется.",
-      tone: "warn",
-    },
-  ];
+    read();
 
-  const aiNext = [
-    "Пересобрать кампании поиска: минус-фразы + корректировки по устройствам.",
-    "Разнести посадочные под 2–3 ключевых сегмента (снизит CPL).",
-    "Подключить GSC и свести лиды со сделками (сквозная станет честной).",
-  ];
+    const onUpdated = () => read();
+    window.addEventListener("knopka:projectFactUpdated", onUpdated);
 
-  const dot =
-    (tone: "bad" | "warn" | "ok") =>
-    tone === "bad"
-      ? "bg-rose-500"
-      : tone === "warn"
-        ? "bg-amber-500"
-        : "bg-green-500";
+    return () => window.removeEventListener("knopka:projectFactUpdated", onUpdated);
+  }, []);
+
+  const channelBudgets = useMemo(() => {
+    const rows = (fact as any)?.channelBudgets ?? [];
+    if (!Array.isArray(rows)) return [];
+    return rows
+      .map((r: any) => ({
+        id: String(r?.id ?? ""),
+        channel: String(r?.channel ?? "").trim(),
+        budget: toNumber(r?.budget),
+      }))
+      .filter((r) => r.channel.length > 0);
+  }, [fact]);
+
+  const specialistCosts = useMemo(() => {
+    const rows = (fact as any)?.specialistCosts ?? [];
+    if (!Array.isArray(rows)) return [];
+    return rows
+      .map((r: any) => ({
+        id: String(r?.id ?? ""),
+        role: String(r?.role ?? "").trim(),
+        cost: toNumber(r?.cost),
+      }))
+      .filter((r) => r.role.length > 0);
+  }, [fact]);
+
+  const platformLinks = useMemo(() => {
+    const links = (fact as any)?.platformLinks ?? {};
+    return {
+      site: String(links?.site ?? "").trim(),
+      telegram: String(links?.telegram ?? "").trim(),
+      instagram: String(links?.instagram ?? "").trim(),
+      vk: String(links?.vk ?? "").trim(),
+      yandexMaps: String(links?.yandexMaps ?? links?.yandexBusiness ?? "").trim(),
+      avito: String(links?.avito ?? "").trim(),
+      marketplaces: String(links?.marketplaces ?? "").trim(),
+      other: String(links?.other ?? "").trim(),
+    };
+  }, [fact]);
+
+  const connected = useMemo(() => {
+    const arr = (fact as any)?.channels?.connected ?? [];
+    return Array.isArray(arr) ? arr.map((x: any) => String(x)) : [];
+  }, [fact]);
+
+  const totals = useMemo(() => {
+    const ads = channelBudgets.reduce((s, r) => s + (r.budget || 0), 0);
+    const people = specialistCosts.reduce((s, r) => s + (r.cost || 0), 0);
+    const all = ads + people;
+    return { ads, people, all };
+  }, [channelBudgets, specialistCosts]);
+
+  const filteredBudgets = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return channelBudgets;
+    return channelBudgets.filter((r) => r.channel.toLowerCase().includes(query));
+  }, [channelBudgets, q]);
+
+  const filteredSpecialists = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    if (!query) return specialistCosts;
+    return specialistCosts.filter((r) => r.role.toLowerCase().includes(query));
+  }, [specialistCosts, q]);
+
+  const linksList = useMemo(() => {
+    const items: Array<{ label: string; value: string }> = [
+      { label: "Сайт", value: platformLinks.site },
+      { label: "Telegram", value: platformLinks.telegram },
+      { label: "Instagram", value: platformLinks.instagram },
+      { label: "VK", value: platformLinks.vk },
+      { label: "Яндекс.Карты / Бизнес", value: platformLinks.yandexMaps },
+      { label: "Авито", value: platformLinks.avito },
+      { label: "Маркетплейсы", value: platformLinks.marketplaces },
+      { label: "Другое", value: platformLinks.other },
+    ];
+    return items.filter((x) => isFilledText(x.value));
+  }, [platformLinks]);
+
+  // чтобы не падало до загрузки
+  if (!fact) {
+    return <div className="p-6 text-sm text-neutral-600">Загрузка…</div>;
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Каналы</h1>
-          <p className="mt-1 text-sm text-neutral-600">
-            Источники лидов, статусы, KPI и рекомендации. Пока — макет, потом подключим данные и ИИ.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-2 rounded-full border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-700 md:flex">
-            <Clock className="h-4 w-4 text-neutral-500" />
-            <span>Период:</span>
-            <span className="font-medium">последние 30 дней</span>
-          </div>
-
-          <button className="rounded-full border border-neutral-200 bg-white px-3 py-2 text-xs font-medium hover:bg-neutral-50">
-            Импорт KPI
-          </button>
-
-          <button className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800">
-            Добавить канал
-          </button>
-        </div>
-      </div>
-
-      {/* KPI mini */}
-      <div className="grid gap-3 md:grid-cols-3">
-        <MiniKpi
-          icon={<Users className="h-4 w-4 text-neutral-600" />}
-          label="Лиды"
-          value="160"
-          hint="+12% к прошлому периоду"
-        />
-        <MiniKpi
-          icon={<CircleDollarSign className="h-4 w-4 text-neutral-600" />}
-          label="Расход"
-          value="540 000 ₽"
-          hint="Контроль бюджета по каналам"
-        />
-        <MiniKpi
-          icon={<TrendingUp className="h-4 w-4 text-neutral-600" />}
-          label="Средний CPL"
-          value="3 375 ₽"
-          hint="Цель: 3 000 ₽"
-        />
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-        {/* Left column */}
-        <div className="space-y-6">
-          {/* Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-neutral-200 bg-white p-3">
-            <div className="flex min-w-[240px] flex-1 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2">
-              <Search className="h-4 w-4 text-neutral-500" />
-              <input
-                className="w-full bg-transparent text-sm outline-none placeholder:text-neutral-400"
-                placeholder="Поиск по каналам…"
-              />
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm hover:bg-neutral-50">
-                <Filter className="h-4 w-4 text-neutral-500" />
-                Фильтры
-              </button>
-
-              <Link
-                href="/app/systems"
-                className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-sm hover:bg-neutral-50"
-              >
-                Данные и интеграции <ArrowUpRight className="h-4 w-4 text-neutral-500" />
-              </Link>
+    <div className="mx-auto w-full max-w-none px-0">
+      <div className="mx-auto w-full max-w-[1540px] px-6 py-6">
+        {/* Header */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-xs text-neutral-500">Раздел</div>
+            <h1 className="mt-1 text-2xl font-semibold">Каналы</h1>
+            <div className="mt-1 text-sm text-neutral-600">
+              Здесь собраны бюджеты, специалисты и ссылки на площадки из фактуры.
             </div>
           </div>
 
-          {/* Table */}
-          <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
-            <div className="grid grid-cols-[1.2fr_0.8fr_0.7fr_0.7fr_0.7fr_0.7fr_0.7fr] gap-3 bg-neutral-50 px-4 py-3 text-xs font-medium text-neutral-600">
-              <div>Канал</div>
-              <div>Статус</div>
-              <div>Лиды</div>
-              <div>Расход</div>
-              <div>CPL</div>
-              <div>ROI</div>
-              <div className="text-right">Обновление</div>
-            </div>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/app/fact"
+              className="inline-flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm font-medium hover:bg-neutral-50"
+            >
+              Редактировать в фактуре <ArrowUpRight className="h-4 w-4 text-neutral-500" />
+            </Link>
+          </div>
+        </div>
 
-            <div className="divide-y divide-neutral-200">
-              {channels.map((c) => (
-                <Row key={c.name} {...c} />
-              ))}
-            </div>
-          </section>
+        {/* KPI */}
+        <div className="mt-6 grid gap-3 md:grid-cols-3">
+          <MiniCard
+            icon={<CircleDollarSign className="h-4 w-4 text-neutral-600" />}
+            label="Бюджеты по каналам"
+            value={`${money(totals.ads)} ₽`}
+            hint="Сумма по строкам “Каналы и бюджеты”"
+          />
+          <MiniCard
+            icon={<Users className="h-4 w-4 text-neutral-600" />}
+            label="Расходы на специалистов"
+            value={`${money(totals.people)} ₽`}
+            hint="Сумма по строкам “Специалисты”"
+          />
+          <MiniCard
+            icon={<CircleDollarSign className="h-4 w-4 text-neutral-600" />}
+            label="Итого в месяц"
+            value={`${money(totals.all)} ₽`}
+            hint="Каналы + специалисты"
+          />
+        </div>
 
-          {/* Hint block */}
-          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-semibold">Что менять в первую очередь</h2>
-                <p className="mt-1 text-xs text-neutral-600">
-                  Этот блок станет «умным»: будет собираться из фактуры + подключённых источников.
-                </p>
+        {/* Search + quick info */}
+        <div className="mt-6 grid gap-6 lg:grid-cols-[2fr_1fr]">
+          {/* Left */}
+          <div className="space-y-6">
+            {/* Search */}
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-neutral-200 bg-white p-3">
+              <div className="flex min-w-[240px] flex-1 items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2">
+                <Search className="h-4 w-4 text-neutral-500" />
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  className="w-full bg-transparent text-sm outline-none placeholder:text-neutral-400"
+                  placeholder="Поиск по каналам и специалистам…"
+                />
               </div>
 
-              <Link
-                href="/app/plans"
-                className="text-sm font-medium text-blue-600 hover:text-blue-700"
-              >
-                Перейти к планам →
-              </Link>
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/app/fact"
+                  className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+                >
+                  Изменить данные <ArrowUpRight className="h-4 w-4" />
+                </Link>
+              </div>
             </div>
 
-            <ul className="mt-4 space-y-2 text-sm text-neutral-700">
-              <li className="flex gap-2">
-                <span className="mt-2 inline-block h-1.5 w-1.5 rounded-full bg-neutral-400" />
-                <span>Каналы с “Нужны данные” блокируют отчёты — закрой их первым делом.</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="mt-2 inline-block h-1.5 w-1.5 rounded-full bg-neutral-400" />
-                <span>Для платных каналов держим CPL в коридоре — иначе рост = слив бюджета.</span>
-              </li>
-              <li className="flex gap-2">
-                <span className="mt-2 inline-block h-1.5 w-1.5 rounded-full bg-neutral-400" />
-                <span>ROI здесь пока “демо”, потом подтянем из CRM и выручки.</span>
-              </li>
-            </ul>
-          </section>
-        </div>
-
-        {/* Right column */}
-        <div className="space-y-6">
-          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h2 className="text-base font-semibold">Что ИИ видит по каналам сейчас</h2>
-            <ul className="mt-3 space-y-2 text-sm text-neutral-700">
-              {aiSummary.map((t) => (
-                <li key={t} className="flex gap-2">
-                  <span className="mt-2 inline-block h-1.5 w-1.5 rounded-full bg-neutral-400" />
-                  <span>{t}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-neutral-600" />
-              <h2 className="text-base font-semibold">Алерты и предупреждения</h2>
-            </div>
-
-            <div className="mt-4 space-y-2">
-              {aiAlerts.map((a) => (
-                <div key={a.title} className="rounded-xl border border-neutral-200 bg-white p-3">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${dot(a.tone as any)}`} />
-                    <span>{a.title}</span>
+            {/* Channels budgets table */}
+            {channelBudgets.length === 0 ? (
+              <EmptyBlock
+                title="Каналы и бюджеты не заполнены"
+                text="Добавь строки в фактуре: какие каналы используете и сколько тратите в месяц."
+              />
+            ) : (
+              <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+                <div className="flex items-center justify-between gap-3 bg-neutral-50 px-4 py-3">
+                  <div className="text-sm font-semibold">Каналы и бюджеты</div>
+                  <div className="text-xs text-neutral-600">
+                    Строк: {filteredBudgets.length}
                   </div>
-                  <div className="mt-1 text-xs text-neutral-600">{a.text}</div>
                 </div>
-              ))}
-            </div>
-          </section>
 
-          <section className="rounded-2xl border border-neutral-200 bg-white p-5">
-            <h2 className="text-base font-semibold">Следующие шаги (предлагает ИИ)</h2>
-            <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-neutral-700">
-              {aiNext.map((t) => (
-                <li key={t}>{t}</li>
-              ))}
-            </ol>
+                <div className="grid grid-cols-[1.2fr_0.7fr_0.7fr] gap-3 bg-white px-4 py-3 text-xs font-medium text-neutral-600">
+                  <div>Канал</div>
+                  <div>Бюджет (₽/мес)</div>
+                  <div className="text-right">Доля</div>
+                </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Link
-                href="/app/setup"
-                className="rounded-full border border-neutral-200 bg-white px-3 py-2 text-xs font-medium hover:bg-neutral-50"
-              >
-                Открыть настройку данных
-              </Link>
+                <div className="divide-y divide-neutral-200">
+                  {filteredBudgets.map((r) => {
+                    const share = totals.ads > 0 ? Math.round((r.budget / totals.ads) * 100) : 0;
+                    return (
+                      <div
+                        key={r.id}
+                        className="grid grid-cols-[1.2fr_0.7fr_0.7fr] gap-3 px-4 py-3 text-sm"
+                      >
+                        <div className="text-neutral-900">{r.channel}</div>
+                        <div className="text-neutral-900">{money(r.budget)} ₽</div>
+                        <div className="text-right text-neutral-700">{share}%</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
-              <Link
-                href="/app/reports"
-                className="rounded-full bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800"
-              >
-                Перейти к отчётам
-              </Link>
-            </div>
-          </section>
+            {/* Specialists table */}
+            {specialistCosts.length === 0 ? (
+              <EmptyBlock
+                title="Специалисты не заполнены"
+                text="Добавь специалистов в фактуре: кто ведёт маркетинг и сколько стоит в месяц."
+              />
+            ) : (
+              <section className="overflow-hidden rounded-2xl border border-neutral-200 bg-white">
+                <div className="flex items-center justify-between gap-3 bg-neutral-50 px-4 py-3">
+                  <div className="text-sm font-semibold">Специалисты</div>
+                  <div className="text-xs text-neutral-600">
+                    Строк: {filteredSpecialists.length}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-[1.2fr_0.7fr] gap-3 bg-white px-4 py-3 text-xs font-medium text-neutral-600">
+                  <div>Роль</div>
+                  <div>Стоимость (₽/мес)</div>
+                </div>
+
+                <div className="divide-y divide-neutral-200">
+                  {filteredSpecialists.map((r) => (
+                    <div
+                      key={r.id}
+                      className="grid grid-cols-[1.2fr_0.7fr] gap-3 px-4 py-3 text-sm"
+                    >
+                      <div className="text-neutral-900">{r.role}</div>
+                      <div className="text-neutral-900">{money(r.cost)} ₽</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+
+          {/* Right */}
+          <div className="space-y-6">
+            {/* Connected */}
+            <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+              <div className="text-sm font-semibold">Что уже есть</div>
+
+              {connected.length === 0 ? (
+                <div className="mt-2 text-sm text-neutral-600">
+                  Пока ничего не отмечено. Заполни на шаге 2 или в фактуре.
+                </div>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {connected.map((x) => (
+                    <span
+                      key={x}
+                      className="rounded-full border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-800"
+                    >
+                      {x}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4">
+                <Link
+                  href="/app/fact"
+                  className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
+                >
+                  Изменить в фактуре <ArrowUpRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </section>
+
+            {/* Links */}
+            <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+              <div className="flex items-center gap-2">
+                <LinkIcon className="h-4 w-4 text-neutral-600" />
+                <div className="text-sm font-semibold">Ссылки на площадки</div>
+              </div>
+
+              {linksList.length === 0 ? (
+                <div className="mt-2 text-sm text-neutral-600">
+                  Ссылки не заполнены. Добавь в фактуре или на шаге 2.
+                </div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {linksList.map((x) => {
+                    const v = normalizeUrl(x.value);
+                    const isHttp = v.startsWith("http://") || v.startsWith("https://");
+                    return (
+                      <div
+                        key={x.label}
+                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2"
+                      >
+                        <div className="text-xs text-neutral-500">{x.label}</div>
+                        <div className="mt-1 break-all text-sm text-neutral-900">
+                          {isHttp ? (
+                            <a
+                              href={v}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-700"
+                            >
+                              {v} <ArrowUpRight className="h-4 w-4" />
+                            </a>
+                          ) : (
+                            <span>{v}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="mt-4">
+                <Link
+                  href="/app/fact"
+                  className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
+                >
+                  Редактировать ссылки <ArrowUpRight className="h-4 w-4" />
+                </Link>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     </div>

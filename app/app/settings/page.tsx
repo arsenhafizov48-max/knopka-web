@@ -1,4 +1,6 @@
 // app/app/settings/page.tsx
+import AccountSignOutHost from "@/app/components/AccountSignOutHost";
+
 export default function SettingsPage() {
   return (
     <div className="space-y-6">
@@ -6,6 +8,8 @@ export default function SettingsPage() {
         <div className="text-sm text-slate-500">Настройки</div>
         <h1 className="text-2xl font-semibold tracking-tight">Профиль и доступ</h1>
       </div>
+
+      <AccountSignOutHost />
 
       <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
         <div className="space-y-1">

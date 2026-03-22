@@ -16,6 +16,34 @@ import {
   type DailyChannelMetrics,
 } from "@/app/app/lib/data/storage";
 
+const DEFAULT_OUTREACH = { calls: 0, messages: 0, otherExpenses: 0 };
+const DEFAULT_FUNNEL = {
+  newLeads: 0,
+  qualified: 0,
+  inProgress: 0,
+  closedWon: 0,
+};
+
+function normalizeDailyEntry(date: string, raw: DailyEntryV2 | null): DailyEntryV2 {
+  if (!raw) {
+    return {
+      date,
+      channels: [],
+      site: { visits: 0, bounceRate: 0, avgTimeSec: 0, depth: 0 },
+      sales: { sql: 0, sales: 0, revenue: 0 },
+      outreach: { ...DEFAULT_OUTREACH },
+      funnel: { ...DEFAULT_FUNNEL },
+      notes: "",
+    };
+  }
+  return {
+    ...raw,
+    outreach: { ...DEFAULT_OUTREACH, ...raw.outreach },
+    funnel: { ...DEFAULT_FUNNEL, ...raw.funnel },
+    notes: raw.notes ?? "",
+  };
+}
+
 function todayISO() {
   const d = new Date();
   const y = d.getFullYear();
@@ -32,11 +60,13 @@ function toNumLoose(raw: any): number {
 }
 
 function totals(entry: DailyEntryV2 | null) {
-  if (!entry) return { spend: 0, revenue: 0, leads: 0 };
+  if (!entry) return { spend: 0, revenue: 0, leads: 0, calls: 0, messages: 0 };
   const spend = (entry.channels || []).reduce((a, x) => a + (x.spend || 0), 0);
   const leads = (entry.channels || []).reduce((a, x) => a + (x.leads || 0), 0);
   const revenue = entry.sales?.revenue || 0;
-  return { spend, revenue, leads };
+  const calls = entry.outreach?.calls || 0;
+  const messages = entry.outreach?.messages || 0;
+  return { spend, revenue, leads, calls, messages };
 }
 
 function ChannelCard({
@@ -148,14 +178,13 @@ export default function Page() {
   const [channels, setChannels] = useState<ChannelDef[]>([]);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
 
-  const [entry, setEntry] = useState<DailyEntryV2>({
-    date: todayISO(),
-    channels: [],
-    site: { visits: 0, bounceRate: 0, avgTimeSec: 0, depth: 0 },
-    sales: { sql: 0, sales: 0, revenue: 0 },
-  });
+  const [entry, setEntry] = useState<DailyEntryV2>(() =>
+    normalizeDailyEntry(todayISO(), null)
+  );
 
-  const [openSection, setOpenSection] = useState<"channels" | "site" | "sales" | null>("channels");
+  const [openSection, setOpenSection] = useState<
+    "channels" | "site" | "sales" | "funnel" | null
+  >("channels");
   const [openChannelId, setOpenChannelId] = useState<string | null>(null);
 
   const [addMode, setAddMode] = useState(false);
@@ -170,16 +199,7 @@ export default function Page() {
 
   useEffect(() => {
     const saved = getDaily(date);
-
-    setEntry(
-      saved || {
-        date,
-        channels: [],
-        site: { visits: 0, bounceRate: 0, avgTimeSec: 0, depth: 0 },
-        sales: { sql: 0, sales: 0, revenue: 0 },
-      }
-    );
-
+    setEntry(normalizeDailyEntry(date, saved));
     setOpenChannelId(null);
     setSavedFlag(false);
   }, [date]);
@@ -227,12 +247,7 @@ export default function Page() {
   }
 
   function onClearAll() {
-    setEntry({
-      date,
-      channels: [],
-      site: { visits: 0, bounceRate: 0, avgTimeSec: 0, depth: 0 },
-      sales: { sql: 0, sales: 0, revenue: 0 },
-    });
+    setEntry(normalizeDailyEntry(date, null));
     setOpenChannelId(null);
   }
 
@@ -272,7 +287,10 @@ export default function Page() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold text-neutral-900">Данные</h1>
-        <div className="mt-1 text-sm text-neutral-600">Ежедневный ввод показателей для отчётов.</div>
+        <div className="mt-1 text-sm text-neutral-600">
+          Ежедневный ввод: каналы, сайт, продажи, воронка и коммуникации. Отчёты недели и
+          месяца считаются из сохранённых дней.
+        </div>
       </div>
 
       {/* Панель управления */}
@@ -317,6 +335,11 @@ export default function Page() {
             </div>
             <div>
               <span className="font-medium text-neutral-900">заявки {dayTotals.leads}</span>
+            </div>
+            <div>
+              <span className="font-medium text-neutral-900">
+                звонки {dayTotals.calls} / сообщ. {dayTotals.messages}
+              </span>
             </div>
           </div>
         </div>
@@ -626,6 +649,202 @@ export default function Page() {
                 className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-medium hover:bg-neutral-50"
               >
                 Сбросить
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      {/* Воронка и коммуникации */}
+      <div className="rounded-2xl border border-neutral-200 bg-white p-5">
+        <button
+          onClick={() => setOpenSection((v) => (v === "funnel" ? null : "funnel"))}
+          className="flex w-full items-center justify-between text-left"
+        >
+          <div className="text-sm font-semibold text-neutral-900">
+            Воронка и коммуникации
+          </div>
+          <div className="text-xs text-neutral-600">
+            {openSection === "funnel" ? "Свернуть" : "Раскрыть"}
+          </div>
+        </button>
+
+        {openSection === "funnel" ? (
+          <div className="mt-4 space-y-6">
+            <div>
+              <div className="text-xs font-medium text-neutral-700">Коммуникации</div>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                  <div className="text-xs text-neutral-600">Звонки</div>
+                  <input
+                    value={entry.outreach?.calls ?? 0}
+                    onChange={(e) =>
+                      setEntry((p) => ({
+                        ...p,
+                        outreach: {
+                          ...DEFAULT_OUTREACH,
+                          ...p.outreach,
+                          calls: toNumLoose(e.target.value),
+                        },
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                  <div className="text-xs text-neutral-600">Сообщения (мессенджеры и т.п.)</div>
+                  <input
+                    value={entry.outreach?.messages ?? 0}
+                    onChange={(e) =>
+                      setEntry((p) => ({
+                        ...p,
+                        outreach: {
+                          ...DEFAULT_OUTREACH,
+                          ...p.outreach,
+                          messages: toNumLoose(e.target.value),
+                        },
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                  <div className="text-xs text-neutral-600">Прочие расходы, ₽</div>
+                  <input
+                    value={entry.outreach?.otherExpenses ?? 0}
+                    onChange={(e) =>
+                      setEntry((p) => ({
+                        ...p,
+                        outreach: {
+                          ...DEFAULT_OUTREACH,
+                          ...p.outreach,
+                          otherExpenses: toNumLoose(e.target.value),
+                        },
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none"
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-medium text-neutral-700">
+                Этапы продаж за день
+              </div>
+              <p className="mt-1 text-xs text-neutral-500">
+                Заявки с каналов считаются отдельно в блоке «Каналы». Здесь — ваша воронка
+                в CRM или учёте.
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                  <div className="text-xs text-neutral-600">Новые лиды</div>
+                  <input
+                    value={entry.funnel?.newLeads ?? 0}
+                    onChange={(e) =>
+                      setEntry((p) => ({
+                        ...p,
+                        funnel: {
+                          ...DEFAULT_FUNNEL,
+                          ...p.funnel,
+                          newLeads: toNumLoose(e.target.value),
+                        },
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                  <div className="text-xs text-neutral-600">Квалифицированы</div>
+                  <input
+                    value={entry.funnel?.qualified ?? 0}
+                    onChange={(e) =>
+                      setEntry((p) => ({
+                        ...p,
+                        funnel: {
+                          ...DEFAULT_FUNNEL,
+                          ...p.funnel,
+                          qualified: toNumLoose(e.target.value),
+                        },
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                  <div className="text-xs text-neutral-600">В работе / переговоры</div>
+                  <input
+                    value={entry.funnel?.inProgress ?? 0}
+                    onChange={(e) =>
+                      setEntry((p) => ({
+                        ...p,
+                        funnel: {
+                          ...DEFAULT_FUNNEL,
+                          ...p.funnel,
+                          inProgress: toNumLoose(e.target.value),
+                        },
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="rounded-2xl border border-neutral-200 bg-white p-3">
+                  <div className="text-xs text-neutral-600">Успешно закрыто</div>
+                  <input
+                    value={entry.funnel?.closedWon ?? 0}
+                    onChange={(e) =>
+                      setEntry((p) => ({
+                        ...p,
+                        funnel: {
+                          ...DEFAULT_FUNNEL,
+                          ...p.funnel,
+                          closedWon: toNumLoose(e.target.value),
+                        },
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-neutral-200 px-3 py-2 text-sm outline-none"
+                    inputMode="numeric"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs font-medium text-neutral-700">Заметка к дню</div>
+              <textarea
+                value={entry.notes ?? ""}
+                onChange={(e) => setEntry((p) => ({ ...p, notes: e.target.value }))}
+                placeholder="Что важного произошло: тест гипотезы, сбой, акция…"
+                rows={3}
+                className="mt-2 w-full rounded-2xl border border-neutral-200 px-3 py-2 text-sm outline-none"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={onSave}
+                className="rounded-full bg-neutral-900 px-4 py-2 text-xs font-medium text-white hover:bg-neutral-800"
+              >
+                Сохранить день
+              </button>
+              <button
+                onClick={() =>
+                  setEntry((p) => ({
+                    ...p,
+                    outreach: { ...DEFAULT_OUTREACH },
+                    funnel: { ...DEFAULT_FUNNEL },
+                    notes: "",
+                  }))
+                }
+                className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-xs font-medium hover:bg-neutral-50"
+              >
+                Сбросить блок
               </button>
             </div>
           </div>
