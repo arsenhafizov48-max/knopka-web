@@ -39,7 +39,8 @@ export function StrategyGigaChat({ doc }: { doc: StrategyDocument | null }) {
     setTurns(nextTurns);
     setLoading(true);
     try {
-      const res = await fetch(withBasePath("/api/gigachat/chat"), {
+      const url = `${window.location.origin}${withBasePath("/api/gigachat/chat")}`;
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -48,7 +49,15 @@ export function StrategyGigaChat({ doc }: { doc: StrategyDocument | null }) {
           history: turns,
         }),
       });
-      const data = (await res.json()) as { reply?: string; error?: string };
+      const rawText = await res.text();
+      let data: { reply?: string; error?: string };
+      try {
+        data = JSON.parse(rawText) as { reply?: string; error?: string };
+      } catch {
+        throw new Error(
+          rawText.slice(0, 120) || `Сервер вернул не JSON (код ${res.status}). Проверь деплой и /api/gigachat/chat.`
+        );
+      }
       if (!res.ok) {
         throw new Error(data.error || `Ошибка ${res.status}`);
       }
