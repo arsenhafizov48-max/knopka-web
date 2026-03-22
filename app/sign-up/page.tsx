@@ -166,38 +166,8 @@ export default function SignUpPage() {
         <h1 className="text-center text-2xl font-semibold tracking-tight sm:text-[28px]">
           Регистрация в КНОПКА
         </h1>
-        <p className="mt-2 text-center text-sm text-neutral-600">
-          Уже есть аккаунт?{" "}
-          <Link href="/login" className="font-medium text-[#5E4FFF] hover:underline">
-            Войти
-          </Link>
-        </p>
 
-        <label className="mt-6 flex cursor-pointer items-start gap-2 rounded-xl border border-neutral-200 bg-neutral-50/50 p-3 text-left text-sm leading-snug text-neutral-700">
-          <input
-            type="checkbox"
-            checked={acceptedLegal}
-            onChange={(e) => setAcceptedLegal(e.target.checked)}
-            className="mt-0.5 h-4 w-4 shrink-0 rounded border-neutral-300"
-          />
-          <span>
-            Соглашаюсь с{" "}
-            <Link href="/legal/privacy" className="font-medium text-[#5E4FFF] hover:underline">
-              политикой конфиденциальности
-            </Link>
-            , даю{" "}
-            <Link href="/legal/consent" className="font-medium text-[#5E4FFF] hover:underline">
-              согласие на обработку ПДн
-            </Link>{" "}
-            и принимаю{" "}
-            <Link href="/legal/terms" className="font-medium text-[#5E4FFF] hover:underline">
-              пользовательское соглашение
-            </Link>
-            .
-          </span>
-        </label>
-
-        <div className="mt-6 grid grid-cols-2 gap-3">
+        <div className="mt-8 grid grid-cols-2 gap-3">
           <button
             type="button"
             disabled={loading}
@@ -320,6 +290,30 @@ export default function SignUpPage() {
             <div className="rounded-xl bg-neutral-100 px-4 py-3 text-sm text-neutral-800">{infoText}</div>
           ) : null}
 
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-neutral-200 bg-neutral-50/50 p-3 text-left text-sm leading-snug text-neutral-700">
+            <input
+              type="checkbox"
+              checked={acceptedLegal}
+              onChange={(e) => setAcceptedLegal(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-neutral-300"
+            />
+            <span>
+              Соглашаюсь с{" "}
+              <Link href="/legal/privacy" className="font-medium text-[#5E4FFF] hover:underline">
+                политикой конфиденциальности
+              </Link>
+              , даю{" "}
+              <Link href="/legal/consent" className="font-medium text-[#5E4FFF] hover:underline">
+                согласие на обработку ПДн
+              </Link>{" "}
+              и принимаю{" "}
+              <Link href="/legal/terms" className="font-medium text-[#5E4FFF] hover:underline">
+                пользовательское соглашение
+              </Link>
+              .
+            </span>
+          </label>
+
           <button
             type="submit"
             disabled={loading}
@@ -328,6 +322,13 @@ export default function SignUpPage() {
             {loading ? "Регистрация…" : "Зарегистрироваться"}
           </button>
         </form>
+
+        <p className="mt-6 text-center text-sm text-neutral-600">
+          Уже есть аккаунт?{" "}
+          <Link href="/login" className="font-medium text-[#5E4FFF] hover:underline">
+            Войти
+          </Link>
+        </p>
       </main>
     </div>
   );

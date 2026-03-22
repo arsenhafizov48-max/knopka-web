@@ -1,265 +1,311 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff, Mail } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/app/lib/supabaseClient";
 import { withBasePath } from "@/app/lib/publicBasePath";
+import { getCabinetEntryPath } from "@/app/app/lib/projectFact";
+import { GoogleBrandIcon, VkBrandIcon, YandexBrandIcon } from "@/app/components/auth/BrandIcons";
+import {
+  getTurnstileSiteKey,
+  isTurnstileConfigured,
+  verifyTurnstileToken,
+} from "@/app/lib/turnstileClient";
 
-function GoogleIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
-      <path
-        fill="#FFC107"
-        d="M43.611 20.083H42V20H24v8h11.303C33.855 32.659 29.27 36 24 36c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.047 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
-      />
-      <path
-        fill="#FF3D00"
-        d="M6.306 14.691 12.877 19.51C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.047 6.053 29.268 4 24 4c-7.682 0-14.354 4.337-17.694 10.691z"
-      />
-      <path
-        fill="#4CAF50"
-        d="M24 44c5.167 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.211 35.091 26.715 36 24 36c-5.248 0-9.821-3.317-11.29-7.946l-6.52 5.02C9.49 39.556 16.227 44 24 44z"
-      />
-      <path
-        fill="#1976D2"
-        d="M43.611 20.083H42V20H24v8h11.303c-.703 1.997-1.94 3.692-3.584 4.87l.003-.002 6.19 5.238C36.971 39.305 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
-      />
-    </svg>
-  );
-}
+const LoginTurnstile = dynamic(() => import("@/app/components/auth/LoginTurnstile"), {
+  ssr: false,
+  loading: () => (
+    <div className="rounded-xl border border-dashed border-neutral-200 py-6 text-center text-xs text-neutral-500">
+      Загрузка проверки…
+    </div>
+  ),
+});
 
-function MailIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M4 7.5A2.5 2.5 0 0 1 6.5 5h11A2.5 2.5 0 0 1 20 7.5v9A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-9Z"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <path
-        d="M5.5 7l6.1 5.02c.24.2.56.2.8 0L18.5 7"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
+type OauthId = "google" | "yandex" | "vk";
 
 export default function LoginPage() {
   const router = useRouter();
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
 
-  // Если уже залогинен — сразу уводим в "внутрянку"
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [infoText, setInfoText] = useState<string | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+
+  const captchaRequired = isTurnstileConfigured();
+  const turnstileSiteKey = getTurnstileSiteKey();
+
   useEffect(() => {
     let alive = true;
-
     supabase.auth.getSession().then(({ data }) => {
       if (!alive) return;
       if (data.session) {
-        router.replace("/demo");
+        router.replace(getCabinetEntryPath());
         router.refresh();
       }
     });
-
     return () => {
       alive = false;
     };
   }, [router, supabase]);
 
-  const [mode, setMode] = useState<"email" | "code">("email");
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
+  const verifyCaptcha = useCallback(async (): Promise<boolean> => {
+    const r = await verifyTurnstileToken(captchaToken);
+    if (r.ok) return true;
+    setErrorText(r.message);
+    setCaptchaToken(null);
+    return false;
+  }, [captchaToken]);
 
-  const [loading, setLoading] = useState(false);
-  const [errorText, setErrorText] = useState<string | null>(null);
-  const [infoText, setInfoText] = useState<string | null>(null);
-
-  const goAfterLogin = () => {
-    router.replace("/demo");
-    router.refresh();
-  };
-
-  const signInGoogle = async () => {
+  const signInOAuth = async (provider: OauthId) => {
+    if (!acceptedLegal) {
+      setErrorText("Подтвердите согласие с документами");
+      return;
+    }
     setErrorText(null);
     setInfoText(null);
+    if (!(await verifyCaptcha())) return;
+
     setLoading(true);
     try {
       const redirectTo = `${window.location.origin}${withBasePath("/auth/callback")}`;
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo },
+        provider: provider as "google",
+        options: {
+          redirectTo,
+          ...(provider === "google" ? { queryParams: { prompt: "select_account" } } : {}),
+        },
       });
       if (error) throw error;
-      // дальше будет редирект на Google
-    } catch (e: any) {
-      setErrorText(e?.message || "Не получилось запустить вход через Google");
+    } catch (e: unknown) {
+      const raw = e instanceof Error ? e.message : String(e);
+      const hint =
+        raw.toLowerCase().includes("provider") || raw.toLowerCase().includes("not enabled")
+          ? " Включите провайдер в Supabase: Authentication → Providers."
+          : "";
+      setErrorText((e instanceof Error ? e.message : "Не удалось продолжить через соцсеть") + hint);
       setLoading(false);
     }
   };
 
-  const onPrimary = async () => {
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setErrorText(null);
     setInfoText(null);
 
-    const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setErrorText("Введите email");
+    if (!acceptedLegal) {
+      setErrorText("Подтвердите согласие с документами");
       return;
     }
 
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setErrorText("Введите почту");
+      return;
+    }
+    if (!password) {
+      setErrorText("Введите пароль");
+      return;
+    }
+
+    if (!(await verifyCaptcha())) return;
+
     setLoading(true);
     try {
-      if (mode === "email") {
-        const emailRedirectTo = `${window.location.origin}${withBasePath("/auth/callback")}`;
-
-        const { error } = await supabase.auth.signInWithOtp({
-          email: cleanEmail,
-          options: {
-            shouldCreateUser: true,
-            emailRedirectTo,
-          },
-        });
-
-        if (error) throw error;
-
-        setMode("code");
-        setInfoText("Мы отправили код на почту. Введите его ниже.");
-        return;
-      }
-
-      const cleanCode = code.trim();
-      if (!cleanCode) {
-        setErrorText("Введите код из письма");
-        return;
-      }
-
-      const { error } = await supabase.auth.verifyOtp({
+      const { error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
-        token: cleanCode,
-        type: "email",
+        password,
       });
-
       if (error) throw error;
-
-      goAfterLogin();
-    } catch (e: any) {
-      setErrorText(e?.message || "Ошибка авторизации");
+      router.replace(getCabinetEntryPath());
+      router.refresh();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Не удалось войти";
+      setErrorText(msg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-white">
-      <div className="mx-auto flex max-w-[1200px] justify-center px-6 pt-[110px]">
-        <div className="w-full max-w-[520px] text-center">
-          {/* ЛОГО */}
-          <div className="flex items-center justify-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-[#EDEBFF]" />
-            <div className="text-[18px] font-semibold text-[#111827]">КНОПКА.</div>
-          </div>
+    <div className="min-h-screen bg-white text-neutral-900">
+      <header className="border-b border-neutral-100 px-6 py-5">
+        <Link href="/" className="inline-flex items-center gap-2 text-lg font-semibold tracking-tight">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#EDEBFF] text-sm font-bold text-[#2B2B2B]">
+            K
+          </span>
+          КНОПКА.
+        </Link>
+      </header>
 
-          {/* ЗАГОЛОВОК */}
-          <h1 className="mt-10 text-[34px] font-semibold leading-[1.08] text-[#111827]">
-            Войдите в свою учетную
-            <br />
-            запись
-          </h1>
+      <main className="mx-auto flex w-full max-w-[440px] flex-col px-6 pb-16 pt-10 sm:pt-14">
+        <h1 className="text-center text-2xl font-semibold tracking-tight sm:text-[28px]">
+          Вход в КНОПКА
+        </h1>
 
-          {/* GOOGLE */}
+        <div className="mt-8 grid grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={signInGoogle}
             disabled={loading}
-            className="mt-10 inline-flex h-[44px] w-full items-center justify-center gap-3 rounded-[10px] border border-black/20 bg-white text-[14px] font-medium text-[#111827] hover:bg-black/[0.02] disabled:opacity-60"
+            onClick={() => signInOAuth("google")}
+            className="inline-flex h-[48px] items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white text-sm font-medium hover:bg-neutral-50 disabled:opacity-60"
+            aria-label="Вход через Google"
           >
-            <GoogleIcon />
-            Продолжить с Google
+            <GoogleBrandIcon className="h-5 w-5" />
+            Google
           </button>
-
-          {/* DIVIDER */}
-          <div className="mt-8 flex items-center gap-4">
-            <div className="h-px flex-1 bg-black/15" />
-            <div className="text-[13px] text-black/50">Или</div>
-            <div className="h-px flex-1 bg-black/15" />
-          </div>
-
-          {/* LABEL */}
-          <div className="mt-6 text-left text-[13px] font-medium text-[#111827]">
-            Введите свой адрес электронной почты
-          </div>
-
-          {/* INPUT */}
-          <div className="mt-2">
-            <div
-              className={`flex h-[44px] w-full items-center gap-3 rounded-[10px] border bg-white px-3 ${
-                mode === "code"
-                  ? "border-black/20"
-                  : "border-[#6B5CFF] shadow-[0_0_0_3px_rgba(107,92,255,0.12)]"
-              }`}
-            >
-              <div className="text-black/45">
-                <MailIcon />
-              </div>
-
-              {mode === "email" ? (
-                <input
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@company.com"
-                  className="h-full w-full bg-transparent text-[14px] text-[#111827] outline-none placeholder:text-black/35"
-                />
-              ) : (
-                <input
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  placeholder="Код из письма"
-                  className="h-full w-full bg-transparent text-[14px] text-[#111827] outline-none placeholder:text-black/35"
-                />
-              )}
-            </div>
-          </div>
-
-          {/* PRIMARY */}
           <button
             type="button"
-            onClick={onPrimary}
             disabled={loading}
-            className="mt-4 h-[44px] w-full rounded-[10px] bg-[#6B5CFF] text-[14px] font-semibold text-white hover:bg-[#5E4FFF] disabled:opacity-60"
+            onClick={() => signInOAuth("yandex")}
+            className="inline-flex h-[48px] items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white text-sm font-medium hover:bg-neutral-50 disabled:opacity-60"
+            aria-label="Вход через Яндекс"
           >
-            {mode === "email" ? "Вход" : "Подтвердить код"}
+            <YandexBrandIcon className="h-5 w-5" />
+            Яндекс
           </button>
-
-          {/* FOOTER */}
-          <div className="mt-5 text-[13px] text-black/70">
-            Войдите в систему с помощью единого входа
-          </div>
-
-          <div className="mt-6 text-[13px] text-black/70">
-            У вас нет аккаунта?{" "}
-            <a href="/sign-up" className="font-medium text-[#6B5CFF] hover:underline">
-              Зарегистрируйтесь
-            </a>
-          </div>
-
-          {/* MESSAGES */}
-          {(errorText || infoText) && (
-            <div className="mt-6 text-left">
-              {errorText && (
-                <div className="rounded-[10px] bg-red-50 px-4 py-3 text-[13px] text-red-700">
-                  {errorText}
-                </div>
-              )}
-              {infoText && (
-                <div className="rounded-[10px] bg-black/5 px-4 py-3 text-[13px] text-black/70">
-                  {infoText}
-                </div>
-              )}
-            </div>
-          )}
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => signInOAuth("vk")}
+            className="inline-flex h-[48px] items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white text-sm font-medium hover:bg-neutral-50 disabled:opacity-60"
+            aria-label="Вход через VK ID"
+          >
+            <VkBrandIcon className="h-5 w-5" />
+            VK ID
+          </button>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => document.getElementById("knopka-login-email")?.focus()}
+            className="inline-flex h-[48px] items-center justify-center gap-2 rounded-xl border border-dashed border-neutral-300 bg-neutral-50/80 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-60"
+            aria-label="Вход по почте"
+          >
+            <Mail className="h-5 w-5 text-neutral-500" />
+            По почте
+          </button>
         </div>
-      </div>
+
+        <div className="my-8 flex items-center gap-3">
+          <div className="h-px flex-1 bg-neutral-200" />
+          <span className="text-xs text-neutral-500">или почта</span>
+          <div className="h-px flex-1 bg-neutral-200" />
+        </div>
+
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="knopka-login-email" className="text-sm font-medium text-neutral-800">
+              Email <span className="text-red-600">*</span>
+            </label>
+            <input
+              id="knopka-login-email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              placeholder="name@company.com"
+              className="mt-1.5 h-11 w-full rounded-xl border border-neutral-200 px-3 text-sm outline-none transition focus:border-[#6B5CFF] focus:ring-2 focus:ring-[#6B5CFF]/20"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="knopka-login-password" className="text-sm font-medium text-neutral-800">
+                Пароль <span className="text-red-600">*</span>
+              </label>
+              <Link
+                href="/forgot-password"
+                className="text-xs font-medium text-[#5E4FFF] hover:underline"
+              >
+                Забыли пароль?
+              </Link>
+            </div>
+            <div className="relative mt-1.5">
+              <input
+                id="knopka-login-password"
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                placeholder="Введите пароль"
+                className="h-11 w-full rounded-xl border border-neutral-200 pr-11 pl-3 text-sm outline-none transition focus:border-[#6B5CFF] focus:ring-2 focus:ring-[#6B5CFF]/20"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800"
+                aria-label={showPassword ? "Скрыть пароль" : "Показать пароль"}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          {captchaRequired ? (
+            <div className="rounded-xl border border-neutral-100 bg-neutral-50/50 p-3">
+              <LoginTurnstile siteKey={turnstileSiteKey} onToken={setCaptchaToken} />
+            </div>
+          ) : process.env.NODE_ENV === "development" ? (
+            <p className="rounded-xl border border-dashed border-amber-200 bg-amber-50/50 px-3 py-2 text-xs text-amber-900">
+              <strong>Только для разработки:</strong> капча не подключена. Для боя — ключи в{" "}
+              <code className="rounded bg-white px-1">.env.local</code>, см. <code className="rounded bg-white px-1">.env.example</code>.
+            </p>
+          ) : null}
+
+          {errorText ? (
+            <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-800">{errorText}</div>
+          ) : null}
+          {infoText ? (
+            <div className="rounded-xl bg-neutral-100 px-4 py-3 text-sm text-neutral-800">{infoText}</div>
+          ) : null}
+
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-neutral-200 bg-neutral-50/50 p-3 text-left text-sm leading-snug text-neutral-700">
+            <input
+              type="checkbox"
+              checked={acceptedLegal}
+              onChange={(e) => setAcceptedLegal(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-neutral-300"
+            />
+            <span>
+              Соглашаюсь с{" "}
+              <Link href="/legal/privacy" className="font-medium text-[#5E4FFF] hover:underline">
+                политикой конфиденциальности
+              </Link>
+              , даю{" "}
+              <Link href="/legal/consent" className="font-medium text-[#5E4FFF] hover:underline">
+                согласие на обработку ПДн
+              </Link>{" "}
+              и принимаю{" "}
+              <Link href="/legal/terms" className="font-medium text-[#5E4FFF] hover:underline">
+                пользовательское соглашение
+              </Link>
+              .
+            </span>
+          </label>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="h-12 w-full rounded-xl bg-[#2563EB] text-sm font-semibold text-white shadow-sm hover:bg-[#1d4ed8] disabled:opacity-60"
+          >
+            {loading ? "Вход…" : "Войти"}
+          </button>
+        </form>
+
+        <p className="mt-6 text-center text-sm text-neutral-600">
+          Нет аккаунта?{" "}
+          <Link href="/sign-up" className="font-medium text-[#5E4FFF] hover:underline">
+            Зарегистрироваться
+          </Link>
+        </p>
+      </main>
     </div>
   );
 }
