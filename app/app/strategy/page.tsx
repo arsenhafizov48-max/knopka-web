@@ -131,7 +131,7 @@ export default function StrategyPage() {
         </div>
       </div>
 
-      <StrategyGigaChat doc={doc} />
+      <StrategyGigaChat doc={doc} fact={fact} />
 
       {!gaps.ok ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5">

@@ -4,6 +4,8 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { MessageCircle, Send } from "lucide-react";
 
 import { withBasePath } from "@/app/lib/publicBasePath";
+import type { ProjectFact } from "@/app/app/lib/projectFact";
+import { formatProjectFactForAi } from "@/app/app/lib/gigachat/formatProjectFactForAi";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
@@ -21,7 +23,13 @@ function buildStrategyContext(doc: StrategyDocument | null): string {
   return lines.join("\n").slice(0, 20_000);
 }
 
-export function StrategyGigaChat({ doc }: { doc: StrategyDocument | null }) {
+export function StrategyGigaChat({
+  doc,
+  fact,
+}: {
+  doc: StrategyDocument | null;
+  fact: ProjectFact | null;
+}) {
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -29,6 +37,7 @@ export function StrategyGigaChat({ doc }: { doc: StrategyDocument | null }) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const strategyContext = useMemo(() => buildStrategyContext(doc), [doc]);
+  const cabinetContext = useMemo(() => formatProjectFactForAi(fact), [fact]);
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -46,6 +55,7 @@ export function StrategyGigaChat({ doc }: { doc: StrategyDocument | null }) {
         body: JSON.stringify({
           text,
           strategyContext: strategyContext || undefined,
+          cabinetContext: cabinetContext || undefined,
           history: turns,
         }),
       });
@@ -75,7 +85,7 @@ export function StrategyGigaChat({ doc }: { doc: StrategyDocument | null }) {
       setLoading(false);
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
     }
-  }, [input, loading, turns, strategyContext]);
+  }, [input, loading, turns, strategyContext, cabinetContext]);
 
   return (
     <div className="rounded-2xl border border-emerald-200/80 bg-gradient-to-br from-emerald-50/90 to-white p-5 ring-1 ring-emerald-100">
@@ -86,10 +96,9 @@ export function StrategyGigaChat({ doc }: { doc: StrategyDocument | null }) {
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-neutral-900">Чат с GigaChat</div>
           <p className="mt-1 text-sm text-neutral-600">
-            Спроси про стратегию, каналы, формулировки или что уточнить в фактуре.
-            {doc
-              ? " В промпт подставляется текст твоего документа."
-              : " Документ ещё не сформирован — отвечу в общих чертах."}
+            Спроси про стратегию, точку А/Б, каналы, материалы. В запрос уходит{" "}
+            <strong>снимок фактуры из ЛК</strong> (онбординг, фактура, файлы — имена, не содержимое) и,
+            если есть, текст сформированной стратегии.
           </p>
 
           <div className="mt-4 max-h-[min(420px,55vh)] space-y-3 overflow-y-auto rounded-xl border border-emerald-100/80 bg-white/80 p-3">

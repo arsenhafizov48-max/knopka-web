@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import { gigachatChatCompletion, type GigaChatMessage } from "@/app/lib/gigachat/server";
 
 const SYSTEM_PROMPT = `Ты — ассистент продукта «КНОПКА» (маркетинговый кабинет для бизнеса).
-Пользователь работает со страницей «Стратегия маркетинга»: документ собирается из фактуры бизнеса, без выдуманных цифр.
-Отвечай по-русски, кратко и по делу. Не придумывай метрики, выручку, конверсии и факты о бизнесе пользователя — если данных нет, так и скажи.
-Можешь предлагать формулировки разделов стратегии, гипотезы каналов и вопросы для уточнения фактуры.`;
+Пользователь на странице «Стратегия маркетинга». Ниже в сообщении может быть снимок его фактуры из ЛК (точка А/Б, каналы, материалы, ссылки и т.д.) и/или текст сформированной стратегии.
+Опирайся ТОЛЬКО на эти данные: не выдумывай цифры, города, выручку и факты, которых нет в снимке. Если чего-то нет — скажи прямо и предложи, что заполнить в кабинете (Фактура, шаги онбординга, материалы).
+Отвечай по-русски, структурировано. Можешь анализировать разрыв А→Б, каналы, гипотезы и формулировки для стратегии.`;
 
 const MAX_USER_CHARS = 12_000;
 const MAX_HISTORY = 24;
@@ -13,6 +13,8 @@ const MAX_HISTORY = 24;
 type Body = {
   text?: string;
   strategyContext?: string;
+  /** Снимок фактуры из ЛК (точка А/Б, материалы, каналы…) */
+  cabinetContext?: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
@@ -42,6 +44,9 @@ export async function POST(req: Request) {
   const strategyContext =
     typeof body.strategyContext === "string" ? body.strategyContext.trim().slice(0, 24_000) : "";
 
+  const cabinetContext =
+    typeof body.cabinetContext === "string" ? body.cabinetContext.trim().slice(0, 28_000) : "";
+
   const history = Array.isArray(body.history) ? body.history.slice(-MAX_HISTORY) : [];
   for (const m of history) {
     if (
@@ -54,8 +59,11 @@ export async function POST(req: Request) {
   }
 
   let system = SYSTEM_PROMPT;
+  if (cabinetContext) {
+    system += `\n\n${cabinetContext}`;
+  }
   if (strategyContext) {
-    system += `\n\nКонтекст текущей стратегии (фрагмент):\n${strategyContext}`;
+    system += `\n\nКонтекст сформированного документа стратегии:\n${strategyContext}`;
   }
 
   const messages: GigaChatMessage[] = [{ role: "system", content: system }];
