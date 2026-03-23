@@ -1,7 +1,6 @@
 // app/page.tsx
 import Image from "next/image";
 import TabsBlock from "./components/TabsBlock";
-import { SupabasePing } from "./lib/SupabasePing";
 
 
 export default function Home() {
@@ -218,9 +217,6 @@ export default function Home() {
 
       {/* ВТОРОЙ ЭКРАН — табы */}
       <TabsBlock />
-
-      {/* SUPABASE PING */}
-      <SupabasePing />
     </div>
   );
 }
