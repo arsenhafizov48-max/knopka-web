@@ -9,6 +9,13 @@ const basePath =
 
 const nextConfig: NextConfig = {
   basePath: basePath || undefined,
+  /**
+   * Без этого на Vercel запросы к /_next/image часто висят в Pending (оптимизация через serverless).
+   * Картинки из public/ отдаются напрямую — стабильнее на проде.
+   */
+  images: {
+    unoptimized: true,
+  },
 };
 
 export default nextConfig;
