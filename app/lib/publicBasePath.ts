@@ -17,32 +17,35 @@ export function withBasePath(path: string): string {
 }
 
 /**
- * В браузере: если NEXT_PUBLIC_BASE_PATH не попал в бандл, но сайт открыт как /knopka/app/...,
- * выводим префикс из pathname — иначе fetch на /api/... даёт 404 HTML вместо JSON.
+ * Первый сегмент URL после домена — это basePath, если это НЕ корневой маршрут Next-приложения.
+ * Так работает и /knopka/app/strategy, и /кнопка/onboarding/step-1, и /кнопка/fact (раньше ломалось:
+ * второй сегмент не был в whitelist → падали на пустой env → fetch на /api/... → HTML 404).
  */
+const PATH_ROOT_FIRST_SEGMENTS = new Set([
+  "app",
+  "login",
+  "sign-up",
+  "forgot-password",
+  "demo",
+  "dev-nav",
+  "auth",
+  "legal",
+  "_next",
+  "api",
+]);
+
 function inferClientBasePathFromPathname(): string {
   if (typeof window === "undefined") return getPublicBasePath();
 
-  const segs = window.location.pathname.split("/").filter(Boolean);
-  if (segs.length === 0) return getPublicBasePath();
+  const parts = window.location.pathname.split("/").filter(Boolean);
+  if (parts.length === 0) return getPublicBasePath();
 
-  if (segs[0] === "app") return "";
-
-  const knownSecond = new Set([
-    "app",
-    "login",
-    "sign-up",
-    "forgot-password",
-    "demo",
-    "dev-nav",
-    "auth",
-    "legal",
-  ]);
-  if (segs.length >= 2 && knownSecond.has(segs[1]!)) {
-    return `/${segs[0]}`;
+  const head = parts[0]!;
+  if (PATH_ROOT_FIRST_SEGMENTS.has(head)) {
+    return "";
   }
 
-  return getPublicBasePath();
+  return `/${head}`;
 }
 
 /** Для fetch() с клиента — путь к API/страницам с учётом basePath даже при расхождении env в бандле. */
