@@ -5,6 +5,10 @@ import { gigachatChatCompletion } from "@/app/lib/gigachat/server";
 import { getSupabaseServerClient } from "@/app/lib/supabaseServer";
 import { wordstatTopRequests } from "@/app/lib/wordstat/client";
 import {
+  extractGeoTokensForStripping,
+  stripGeoTokensFromPhrase,
+} from "@/app/lib/wordstat/phraseGeoSanitize";
+import {
   getWordstatRegionsTreeCached,
   isAllRussiaGeo,
   regionLabelForUi,
@@ -170,27 +174,49 @@ type StatRow = {
   error?: string;
 };
 
-function buildStep1User(fact: FactPayload, regionLabel: string, product: string, project: string, attempt: number): string {
+function buildStep1User(
+  fact: FactPayload,
+  regionLabel: string,
+  coreProduct: string,
+  productCombined: string,
+  servicesLine: string,
+  project: string,
+  attempt: number,
+  hasRegionFilter: boolean
+): string {
+  const geoRule = hasRegionFilter
+    ? `КРИТИЧНО — как в веб-интерфейсе Яндекс.Вордстата: регион «${regionLabel}» уже задаётся ОТДЕЛЬНО в API (параметр regions), пользователь вводит запрос БЕЗ города, а фильтр — «Казань» и т.д.
+Поэтому в КАЖДОЙ фразе ЗАПРЕЩЕНО писать названия городов, областей, краёв, «в Казани», «Казань», «Татарстан» и любые топонимы из строки гео. Иначе спрос сильно занижается: люди чаще ищут «маркетинговое агентство», а не «маркетинговое агентство казань».`
+    : `География в интерфейсе: ${regionLabel}. Если это по сути вся Россия без привязки города в API — топоним в фразе допустим только если без него теряется смысл (редко).`;
+
   const retry =
     attempt > 0
-      ? "\n\nВАЖНО: в прошлый раз не получилось набрать списки. Нужно СТРОГО ровно 10 строк в target и ровно 30 строк в broad — ни больше ни меньше."
+      ? `\n\nПовтор: нужно СТРОГО 10 target и 30 broad.${hasRegionFilter ? " Снова БЕЗ названий городов/регионов в тексте фраз — только параметр regions." : ""}`
       : "";
 
-  return `Ниша: ${fact.niche}
-Проект: ${project || "—"}
-Продукт/услуги: ${product || "не указано"}
-География для поиска (из личного кабинета): ${regionLabel}
-Исходная строка гео: ${fact.geo}
+  return `Ты подбираешь ключевые фразы под Яндекс.Вордстат.
 
-Задача: составить запросы для Яндекс.Вордстат. По каждой фразе API вернёт показатель «спрос» (ориентир месячной частотности).
+Основная ниша (из ЛК): ${fact.niche}
+Ключевой продукт/оффер (отдельное поле фактуры, если есть): ${coreProduct || "—"}
+Сводка продукт/услуги: ${productCombined || "не указано"}
+Дополнительные услуги (из фактуры, список): ${servicesLine}
+Проект: ${project || "—"}
+Строка гео в ЛК: ${fact.geo}
+
+${geoRule}
+
+Логика подбора:
+- target (10 шт.): «целевой» коммерческий спрос по ОСНОВНОЙ нише и ключевому офферу. Делай синонимы и близкие формулировки: например при нише «маркетинговое агентство» — «маркетинговое агентство», «интернет-маркетинг агентство», «digital агентство», «агентство интернет-маркетинга», «маркетолог на аутсорсе», «аутсорс маркетолог» — всё по смыслу ниши, без города в строке.
+- broad (30 шт.): более широкий и смежный спрос, сравнения, информационные, конкурирующие формулировки. Если в доп. услугах есть сайт, контекст, SMM, брендинг — включай ОТДЕЛЬНЫЕ широкие запросы по этим темам (тоже без топонима, если действует запрет выше).
+
+Задача: составить фразы для метода topRequests. По каждой фразе API вернёт «спрос» за период ~месяц.
 
 Верни ТОЛЬКО JSON без markdown:
 {"target":["...","..." x10],"broad":["...","..." x30],"notes":"одно предложение"}
 
-Жёсткие правила:
-- В массиве target РОВНО 10 уникальных фраз — максимально «целевой» коммерческий и покупательский спрос в этой нише (русский язык).
-- В массиве broad РОВНО 30 уникальных фраз — более общий, смежный, широкий или неоднозначный спрос (не дублировать target).
-- Фразы короткие (2–7 слов), без нумерации и кавычек.
+Жёстко:
+- РОВНО 10 уникальных target и РОВНО 30 уникальных broad, без пересечения между списками.
+- Фразы 2–7 слов, русский язык, без кавычек и нумерации.
 ${retry}`;
 }
 
@@ -223,24 +249,40 @@ export async function POST(req: Request) {
   const regionIds = resolveWordstatRegionIds(fact.geo, tree);
   const regionLabel = regionLabelForUi(fact.geo, regionIds, tree);
 
-  const product = describeProduct(fact);
+  const productCombined = describeProduct(fact);
+  const coreProduct = normalizeText(fact.economics?.product ?? "");
+  const servicesLine =
+    (fact.services ?? []).map((s) => normalizeText(s)).filter(Boolean).join("; ") || "—";
   const project = normalizeText(fact.projectName);
   const avgCheckRub = parseAverageCheckRub(normalizeText(fact.economics?.averageCheck ?? ""));
   const avgCheckStr = normalizeText(fact.economics?.averageCheck ?? "");
+
+  const hasRegionFilter = Boolean(regionIds?.length);
+  const geoStripTokens = hasRegionFilter ? extractGeoTokensForStripping(fact.geo) : [];
 
   let target: string[] = [];
   let broad: string[] = [];
   let parsed1Notes = "";
 
   for (let attempt = 0; attempt < 2; attempt++) {
-    const step1User = buildStep1User(fact, regionLabel, product, project, attempt);
+    const step1User = buildStep1User(
+      fact,
+      regionLabel,
+      coreProduct,
+      productCombined,
+      servicesLine,
+      project,
+      attempt,
+      hasRegionFilter
+    );
     let raw1: string;
     try {
       raw1 = await gigachatChatCompletion([
         {
           role: "system",
-          content:
-            "Ты маркетолог-исследователь. Отвечай только валидным JSON. Соблюдай точное число элементов в массивах, как просит пользователь.",
+          content: hasRegionFilter
+            ? "Ты маркетолог-исследователь. Отвечай только валидным JSON. География уже в API (regions): в тексте фраз НЕЛЬЗЯ указывать города, области и страны — только смысл запроса."
+            : "Ты маркетолог-исследователь. Отвечай только валидным JSON. Соблюдай точное число элементов в массивах, как просит пользователь.",
         },
         { role: "user", content: step1User },
       ]);
@@ -262,8 +304,18 @@ export async function POST(req: Request) {
 
     parsed1Notes = typeof parsed1.notes === "string" ? parsed1.notes.trim() : "";
 
-    const rawTarget = uniqStrings(Array.isArray(parsed1.target) ? parsed1.target : [], 20);
-    const rawBroad = uniqStrings(Array.isArray(parsed1.broad) ? parsed1.broad : [], 45);
+    const rawTarget = uniqStrings(
+      (Array.isArray(parsed1.target) ? parsed1.target : []).map((x) =>
+        typeof x === "string" ? stripGeoTokensFromPhrase(x, geoStripTokens) : x
+      ),
+      25
+    );
+    const rawBroad = uniqStrings(
+      (Array.isArray(parsed1.broad) ? parsed1.broad : []).map((x) =>
+        typeof x === "string" ? stripGeoTokensFromPhrase(x, geoStripTokens) : x
+      ),
+      45
+    );
     const broadNorm = new Set(rawBroad.map(normPhrase));
     const targetDedup = rawTarget.filter((t) => !broadNorm.has(normPhrase(t)));
 
@@ -363,9 +415,14 @@ export async function POST(req: Request) {
       ? `Регионы Вордстата: id ${regionIds.join(", ")}.`
       : "Регион по строке гео не сопоставился с деревом API — фактически вся Россия.";
 
-  const step2User = `${geoNote}
+  const phraseNote = hasRegionFilter
+    ? "Важно: seed-фразы без топонимов в строке — регион уже ограничен в запросе к API (как поле «Регион» в интерфейсе Вордстата)."
+    : "";
 
-Ниша: ${fact.niche}. Продукт/услуги: ${product || "—"}.
+  const step2User = `${geoNote}
+${phraseNote}
+
+Ниша: ${fact.niche}. Продукт/услуги: ${productCombined || "—"}.
 География (текст для стратегии): ${regionLabel}.
 
 Сумма показателя «спрос» по 10 ЦЕЛЕВЫМ фразам (сумма totalCount): ${fmtNum(sumTarget)}.
@@ -446,8 +503,12 @@ ${JSON.stringify(rows)}
   const potentialRevenueRub =
     avgCheckRub != null && Number.isFinite(expectedDeals) ? expectedDeals * avgCheckRub : null;
 
+  const geoHint = hasRegionFilter
+    ? " Фразы подобраны без названия города/региона в тексте: география задана фильтром региона в API (аналог выпадающего региона в веб-Вордстате)."
+    : "";
+
   const intro =
-    `Данные: Яндекс.Вордстат (метод topRequests), ${regionLabel}. Число в столбце «Спрос» — ориентир месячной частотности по фразе в выбранной географии; это не аудитория «в людях» и не гарантия переходов. ${parsed1Notes ? `Заметка к подбору фраз: ${parsed1Notes}` : ""}`;
+    `Данные: Яндекс.Вордстат (метод topRequests), ${regionLabel}.${geoHint} Число в столбце «Спрос» — ориентир месячной частотности по фразе в выбранной географии; это не аудитория «в людях» и не гарантия переходов. ${parsed1Notes ? `Заметка к подбору фраз: ${parsed1Notes}` : ""}`;
 
   const tables: StrategyTable[] = [
     {
