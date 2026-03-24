@@ -1,5 +1,6 @@
 // app/page.tsx
 import Image from "next/image";
+import Link from "next/link";
 import TabsBlock from "./components/TabsBlock";
 
 
@@ -15,7 +16,10 @@ export default function Home() {
   <div className="mx-auto flex max-w-[1920px] items-center justify-between px-8 py-8">
     <div className="flex items-center gap-3">
       <div className="h-10 w-10 rounded-xl bg-[#EDEBFF]" />
-      <div className="text-[18px] font-semibold text-[#111827]">КНОПКА.</div>
+      <div className="leading-tight">
+        <div className="text-[18px] font-semibold text-[#111827]">КНОПКА.</div>
+        <div className="text-[11px] font-medium text-neutral-500">knopkam.ru</div>
+      </div>
     </div>
 
     <nav className="hidden items-center gap-8 text-[13px] font-medium text-[#111827] md:flex">
@@ -217,6 +221,26 @@ export default function Home() {
 
       {/* ВТОРОЙ ЭКРАН — табы */}
       <TabsBlock />
+
+      {/* Юридические ссылки: видны на главной для проверки Google OAuth / Branding */}
+      <footer className="border-t border-neutral-200 bg-[#F8F8F8] px-6 py-8">
+        <div className="mx-auto flex max-w-[1920px] flex-col items-center justify-between gap-4 text-center text-[13px] text-neutral-600 sm:flex-row sm:text-left">
+          <p className="max-w-xl">
+            Сервис <span className="font-semibold text-neutral-800">КНОПКА</span> —{' '}
+            <a href="https://knopkam.ru" className="text-[#5E4FFF] underline underline-offset-2">
+              knopkam.ru
+            </a>
+          </p>
+          <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            <Link href="/legal/privacy" className="text-[#5E4FFF] underline underline-offset-2 hover:text-[#4F46E5]">
+              Политика конфиденциальности
+            </Link>
+            <Link href="/legal/terms" className="text-[#5E4FFF] underline underline-offset-2 hover:text-[#4F46E5]">
+              Пользовательское соглашение
+            </Link>
+          </nav>
+        </div>
+      </footer>
     </div>
   );
 }
