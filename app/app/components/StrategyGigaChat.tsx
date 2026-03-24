@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Maximize2, MessageCircle, Minimize2, Paperclip, Send, X } from "lucide-react";
@@ -88,6 +89,10 @@ export function StrategyGigaChat({
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  /** Без сессии Supabase историю в облако не пишем (имя в шапке ЛК может быть просто заглушкой). */
+  const [cloudPersist, setCloudPersist] = useState<
+    "checking" | "signed_in" | "need_login" | "dev_skip"
+  >(DEV_SKIP_AUTH ? "dev_skip" : "checking");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -104,12 +109,22 @@ export function StrategyGigaChat({
         const {
           data: { user },
         } = await supabase.auth.getUser();
-        if (cancelled || !user) return;
-        const msgs = await loadStrategyThread(supabase, user.id);
-        if (cancelled || msgs.length === 0) return;
-        setTurns(msgs.map(({ role, content }) => ({ role, content })));
+        if (cancelled) return;
+        if (!user) {
+          setCloudPersist("need_login");
+          return;
+        }
+        setCloudPersist("signed_in");
+        try {
+          const msgs = await loadStrategyThread(supabase, user.id);
+          if (cancelled || msgs.length === 0) return;
+          setTurns(msgs.map(({ role, content }) => ({ role, content })));
+        } catch (e) {
+          console.warn("[КНОПКА] История чата стратегии не загружена (таблица gigachat_strategy_thread или сеть):", e);
+        }
       } catch (e) {
-        console.warn("[КНОПКА] История чата стратегии не загружена (таблица gigachat_strategy_thread или сеть):", e);
+        console.warn("[КНОПКА] Supabase недоступен или не настроен:", e);
+        if (!cancelled) setCloudPersist("need_login");
       }
     })();
     return () => {
@@ -290,6 +305,20 @@ export function StrategyGigaChat({
               Стратегия, точка А/Б, каналы. В запрос уходит фактура из ЛК и текст стратегии. Файлы: .txt, .md, .csv. Фото
               пока не в модель.
             </p>
+            {cloudPersist === "need_login" ? (
+              <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
+                История чата не сохраняется после обновления страницы, пока ты не{" "}
+                <Link href={withBasePath("/login")} className="font-semibold text-[#6B5CFF] underline underline-offset-2">
+                  войдёшь в аккаунт
+                </Link>
+                . Имя в шапке кабинета сейчас только для вида — облако привязано к входу через почту или Google.
+              </p>
+            ) : null}
+            {cloudPersist === "dev_skip" ? (
+              <p className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+                Режим без авторизации: история чата в Supabase не сохраняется.
+              </p>
+            ) : null}
           </div>
         </div>
         <button
