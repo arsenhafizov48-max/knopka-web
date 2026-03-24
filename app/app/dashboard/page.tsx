@@ -1,6 +1,7 @@
 // app/app/dashboard/page.tsx
 import StrategyCtaCard from "./StrategyCtaCard";
 import DashboardLiveBlocks from "./DashboardLiveBlocks";
+import WordstatHealthCard from "./WordstatHealthCard";
 
 export default function Page() {
   return (
@@ -23,6 +24,8 @@ export default function Page() {
       </div>
 
       <StrategyCtaCard />
+
+      <WordstatHealthCard />
 
       <DashboardLiveBlocks />
     </div>
