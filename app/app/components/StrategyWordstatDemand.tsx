@@ -35,9 +35,14 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
       });
       const data = (await res.json()) as {
         error?: string;
-        market?: { paragraphs: string[]; bullets: string[] };
+        market?: {
+          paragraphs: string[];
+          bullets: string[];
+          tables?: { title: string; columns: string[]; rows: string[][] }[];
+        };
         regionLabel?: string;
         phrases?: { requested: number };
+        estimate?: { potentialRevenueRub: number | null };
       };
       if (!res.ok) {
         setErr(data.error || `Ошибка ${res.status}`);
@@ -48,16 +53,20 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
         return;
       }
       const base = doc ?? buildStrategyDocument(fact);
-      const next = applyWordstatMarketSection(
-        base,
-        data.market.paragraphs,
-        data.market.bullets ?? []
-      );
+      const next = applyWordstatMarketSection(base, {
+        paragraphs: data.market.paragraphs,
+        bullets: data.market.bullets ?? [],
+        tables: data.market.tables,
+      });
       saveStrategy(next);
       setDoc(next);
       window.dispatchEvent(new Event("knopka:strategyUpdated"));
+      const rev =
+        data.estimate?.potentialRevenueRub != null
+          ? ` Оценка выручки/мес: ${new Intl.NumberFormat("ru-RU").format(data.estimate.potentialRevenueRub)} ₽.`
+          : "";
       setOk(
-        `Раздел «Анализ спроса» обновлён: ${data.regionLabel ?? "гео"}, в Вордстат ушло ${data.phrases?.requested ?? "—"} фраз (1 ед. квоты).`
+        `Раздел обновлён: ${data.regionLabel ?? "гео"}, ${data.phrases?.requested ?? "—"} фраз в одном запросе Вордстата.${rev}`
       );
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Не удалось связаться с сервером");
@@ -75,9 +84,9 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-neutral-900">Анализ спроса (Яндекс.Вордстат)</div>
           <p className="mt-1 text-sm text-neutral-600">
-            ИИ подбирает запросы под вашу нишу из фактуры, сам делит их на целевые и общие, затем тянет
-            статистику Вордстата за период, близкий к месяцу (topRequests). География берётся из поля
-            «География» в ЛК: Россия, область или город — как вы указали.
+            ИИ подбирает ровно 10 целевых и 30 общих запросов, по каждому подтягивается спрос из Вордстата.
+            Затем модель задаёт оценку конверсии в сделку; сервер считает ожидаемые оплаты и потенциальную
+            выручку по среднему чеку из фактуры. География — из поля «География» в ЛК.
           </p>
           <button
             type="button"

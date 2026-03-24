@@ -1,11 +1,15 @@
-import type { StrategyDocument } from "./types";
+import type { StrategyDocument, StrategyTable } from "./types";
 
 /** Подменяет блок «2. Анализ спроса и конкурентов» данными из Вордстата + ИИ. */
 export function applyWordstatMarketSection(
   doc: StrategyDocument,
-  paragraphs: string[],
-  bullets: string[]
+  payload: {
+    paragraphs: string[];
+    bullets: string[];
+    tables?: StrategyTable[];
+  }
 ): StrategyDocument {
+  const { paragraphs, bullets, tables } = payload;
   return {
     ...doc,
     generatedAt: new Date().toISOString(),
@@ -16,6 +20,7 @@ export function applyWordstatMarketSection(
             title: "2. Анализ спроса и конкурентов",
             paragraphs,
             bullets,
+            tables: tables?.length ? tables : undefined,
           }
         : s
     ),

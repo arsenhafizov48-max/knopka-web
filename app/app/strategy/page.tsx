@@ -200,13 +200,69 @@ export default function StrategyPage() {
                   </span>
                 </summary>
                 <div className="border-t border-neutral-100 px-5 pb-5 pt-3">
-                  <div className="space-y-3 text-sm text-neutral-700">
-                    {sec.paragraphs.map((p, i) => (
-                      <p key={i} className="leading-relaxed">
-                        {p}
-                      </p>
-                    ))}
-                  </div>
+                  {(() => {
+                    const marketDataFirst =
+                      (sec.tables?.length ?? 0) > 0 && sec.paragraphs.length > 0;
+                    const lead = marketDataFirst ? sec.paragraphs[0] : null;
+                    const bodyParas = marketDataFirst ? sec.paragraphs.slice(1) : sec.paragraphs;
+                    return (
+                      <>
+                        {lead ? (
+                          <p className="text-sm leading-relaxed text-neutral-700">{lead}</p>
+                        ) : null}
+                        {sec.tables && sec.tables.length > 0 ? (
+                          <div className={lead ? "mt-4 space-y-5" : "space-y-5"}>
+                            {sec.tables.map((tb, ti) => (
+                              <div key={ti} className="overflow-x-auto">
+                                <div className="mb-2 text-xs font-semibold text-neutral-800">{tb.title}</div>
+                                <table className="w-full min-w-[320px] border-collapse text-xs text-neutral-800">
+                                  <thead>
+                                    <tr>
+                                      {tb.columns.map((c, ci) => (
+                                        <th
+                                          key={ci}
+                                          className="border border-neutral-200 bg-neutral-50 px-2 py-2 text-left font-medium"
+                                        >
+                                          {c}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {tb.rows.map((row, ri) => (
+                                      <tr key={ri}>
+                                        {row.map((cell, ci) => (
+                                          <td
+                                            key={ci}
+                                            className="border border-neutral-200 px-2 py-2 align-top text-neutral-700"
+                                          >
+                                            {cell}
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div
+                          className={
+                            lead || (sec.tables && sec.tables.length > 0)
+                              ? "mt-4 space-y-3 text-sm text-neutral-700"
+                              : "space-y-3 text-sm text-neutral-700"
+                          }
+                        >
+                          {bodyParas.map((p, i) => (
+                            <p key={i} className="leading-relaxed">
+                              {p}
+                            </p>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
                   {sec.bullets && sec.bullets.length > 0 ? (
                     <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-neutral-700">
                       {sec.bullets.map((b, i) => (

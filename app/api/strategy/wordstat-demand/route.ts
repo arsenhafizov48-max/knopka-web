@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import type { StrategyTable } from "@/app/app/lib/strategy/types";
 import { gigachatChatCompletion } from "@/app/lib/gigachat/server";
 import { getSupabaseServerClient } from "@/app/lib/supabaseServer";
 import { wordstatTopRequests } from "@/app/lib/wordstat/client";
@@ -11,15 +12,14 @@ import {
 } from "@/app/lib/wordstat/regionResolve";
 import type { WordstatTopRequestsResult } from "@/app/lib/wordstat/types";
 
-const MAX_TARGET = 22;
-const MAX_BROAD = 12;
-const MAX_COMBINED = 36;
-const TOP_N = 9;
+const N_TARGET = 10;
+const N_BROAD = 30;
+const TOP_N = 8;
 
 type FactPayload = {
   niche: string;
   geo: string;
-  economics?: { product?: string };
+  economics?: { product?: string; averageCheck?: string; marginPercent?: string };
   services?: string[];
   projectName?: string;
 };
@@ -30,6 +30,24 @@ function bad(msg: string, status = 400) {
 
 function normalizeText(s: unknown): string {
   return typeof s === "string" ? s.trim() : "";
+}
+
+function fmtNum(n: number): string {
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
+}
+
+/** Средний чек из строки фактуры: «75 000», «75к», «75 т.р.», «75000». */
+function parseAverageCheckRub(raw: string): number | null {
+  const s = normalizeText(raw).toLowerCase();
+  if (!s) return null;
+  let mult = 1;
+  if (/\bмлн\b|миллион/i.test(s)) mult = 1_000_000;
+  else if (/\bк\b|тыс|т\.?\s*р|тысяч/i.test(s)) mult = 1000;
+
+  const digits = normalizeText(raw).replace(/\s/g, "").replace(",", ".");
+  const n = Number(digits.replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * mult);
 }
 
 function describeProduct(f: FactPayload): string {
@@ -48,13 +66,14 @@ function parseFact(body: unknown): FactPayload | null {
   const niche = normalizeText(o.niche);
   const geo = normalizeText(o.geo);
   if (!niche || !geo) return null;
+  const econ =
+    o.economics && typeof o.economics === "object"
+      ? (o.economics as FactPayload["economics"])
+      : undefined;
   return {
     niche,
     geo,
-    economics:
-      o.economics && typeof o.economics === "object"
-        ? (o.economics as FactPayload["economics"])
-        : undefined,
+    economics: econ,
     services: Array.isArray(o.services)
       ? o.services.filter((x): x is string => typeof x === "string")
       : undefined,
@@ -128,6 +147,21 @@ function asTopResults(data: unknown): WordstatTopRequestsResult[] {
   return [];
 }
 
+function numPercent(v: unknown, fallback: number): number {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const t = v.trim().replace("%", "").replace(",", ".");
+    const n = parseFloat(t);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+function clampConversionPercent(p: number): number {
+  if (!Number.isFinite(p)) return 1;
+  return Math.min(15, Math.max(0.01, p));
+}
+
 type StatRow = {
   kind: "target" | "broad";
   seed: string;
@@ -136,10 +170,33 @@ type StatRow = {
   error?: string;
 };
 
+function buildStep1User(fact: FactPayload, regionLabel: string, product: string, project: string, attempt: number): string {
+  const retry =
+    attempt > 0
+      ? "\n\nВАЖНО: в прошлый раз не получилось набрать списки. Нужно СТРОГО ровно 10 строк в target и ровно 30 строк в broad — ни больше ни меньше."
+      : "";
+
+  return `Ниша: ${fact.niche}
+Проект: ${project || "—"}
+Продукт/услуги: ${product || "не указано"}
+География для поиска (из личного кабинета): ${regionLabel}
+Исходная строка гео: ${fact.geo}
+
+Задача: составить запросы для Яндекс.Вордстат. По каждой фразе API вернёт показатель «спрос» (ориентир месячной частотности).
+
+Верни ТОЛЬКО JSON без markdown:
+{"target":["...","..." x10],"broad":["...","..." x30],"notes":"одно предложение"}
+
+Жёсткие правила:
+- В массиве target РОВНО 10 уникальных фраз — максимально «целевой» коммерческий и покупательский спрос в этой нише (русский язык).
+- В массиве broad РОВНО 30 уникальных фраз — более общий, смежный, широкий или неоднозначный спрос (не дублировать target).
+- Фразы короткие (2–7 слов), без нумерации и кавычек.
+${retry}`;
+}
+
 /**
  * POST /api/strategy/wordstat-demand
- * Тело: { fact: ProjectFact } — достаточно niche, geo, economics.product / services.
- * GigaChat предлагает фразы (целевые / общие) → один batch topRequests → GigaChat пишет блок стратегии.
+ * 10 целевых + 30 общих фраз → Вордстат (1 batch) → таблицы с totalCount → ИИ: текст + % конверсии → расчёт выручки по среднему чеку.
  */
 export async function POST(req: Request) {
   const supabase = await getSupabaseServerClient();
@@ -168,64 +225,69 @@ export async function POST(req: Request) {
 
   const product = describeProduct(fact);
   const project = normalizeText(fact.projectName);
+  const avgCheckRub = parseAverageCheckRub(normalizeText(fact.economics?.averageCheck ?? ""));
+  const avgCheckStr = normalizeText(fact.economics?.averageCheck ?? "");
 
-  const step1User = `Ниша: ${fact.niche}
-Проект: ${project || "—"}
-Продукт/услуги: ${product || "не указано"}
-География для поиска (из личного кабинета пользователя): ${regionLabel}
-Исходная строка гео из фактуры: ${fact.geo}
+  let target: string[] = [];
+  let broad: string[] = [];
+  let parsed1Notes = "";
 
-Задача: составь набор поисковых фраз для Яндекс.Вордстат. Отчёт topRequests показывает спрос в масштабе, близком к месячному.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const step1User = buildStep1User(fact, regionLabel, product, project, attempt);
+    let raw1: string;
+    try {
+      raw1 = await gigachatChatCompletion([
+        {
+          role: "system",
+          content:
+            "Ты маркетолог-исследователь. Отвечай только валидным JSON. Соблюдай точное число элементов в массивах, как просит пользователь.",
+        },
+        { role: "user", content: step1User },
+      ]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "GigaChat";
+      return NextResponse.json({ error: `GigaChat (подбор фраз): ${msg}` }, { status: 502 });
+    }
 
-Верни ТОЛЬКО один JSON-объект без markdown и без текста вокруг:
-{"target":["фраза",...],"broad":["фраза",...],"notes":"1 предложение"}
+    let parsed1: Record<string, unknown>;
+    try {
+      parsed1 = parseModelJson(raw1);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "parse";
+      return NextResponse.json(
+        { error: `Не удалось разобрать ответ модели (фразы): ${msg}` },
+        { status: 502 }
+      );
+    }
 
-Правила:
-- target: до ${MAX_TARGET} фраз — максимально релевантные покупательскому спросу в этой нише (коммерческие и информационные формулировки, русский язык).
-- broad: до ${MAX_BROAD} фраз — более общий/смежный спрос, сравнения, широкие или двусмысленные запросы рядом с нишей.
-- без дубликатов между списками, без пустых строк;
-- фразы короткие (обычно 2–6 слов), без нумерации.`;
+    parsed1Notes = typeof parsed1.notes === "string" ? parsed1.notes.trim() : "";
 
-  let raw1: string;
-  try {
-    raw1 = await gigachatChatCompletion([
-      {
-        role: "system",
-        content:
-          "Ты маркетолог-исследователь. Отвечай только валидным JSON-объектом в одну строку или с переносами, без Markdown.",
-      },
-      { role: "user", content: step1User },
-    ]);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "GigaChat";
-    return NextResponse.json({ error: `GigaChat (подбор фраз): ${msg}` }, { status: 502 });
+    const rawTarget = uniqStrings(Array.isArray(parsed1.target) ? parsed1.target : [], 20);
+    const rawBroad = uniqStrings(Array.isArray(parsed1.broad) ? parsed1.broad : [], 45);
+    const broadNorm = new Set(rawBroad.map(normPhrase));
+    const targetDedup = rawTarget.filter((t) => !broadNorm.has(normPhrase(t)));
+
+    target = targetDedup.slice(0, N_TARGET);
+    broad = rawBroad.slice(0, N_BROAD);
+
+    if (target.length === N_TARGET && broad.length === N_BROAD) break;
   }
 
-  let parsed1: Record<string, unknown>;
-  try {
-    parsed1 = parseModelJson(raw1);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "parse";
+  if (target.length !== N_TARGET || broad.length !== N_BROAD) {
     return NextResponse.json(
-      { error: `Не удалось разобрать ответ модели (фразы): ${msg}` },
+      {
+        error:
+          "Модель не вернула ровно 10 целевых и 30 общих фраз. Нажмите ещё раз или упростите формулировку ниши в фактуре.",
+      },
       { status: 502 }
     );
   }
 
-  const target = uniqStrings(Array.isArray(parsed1.target) ? parsed1.target : [], MAX_TARGET);
-  const broad = uniqStrings(Array.isArray(parsed1.broad) ? parsed1.broad : [], MAX_BROAD);
-
-  const broadNorm = new Set(broad.map(normPhrase));
-  const targetDedup = target.filter((t) => !broadNorm.has(normPhrase(t)));
-  const combined = [...targetDedup, ...broad].slice(0, MAX_COMBINED);
-
-  if (combined.length === 0) {
-    return NextResponse.json({ error: "Модель не вернула ни одной фразы для Вордстата" }, { status: 502 });
-  }
-
   const kindByNorm = new Map<string, "target" | "broad">();
-  for (const p of targetDedup) kindByNorm.set(normPhrase(p), "target");
+  for (const p of target) kindByNorm.set(normPhrase(p), "target");
   for (const p of broad) kindByNorm.set(normPhrase(p), "broad");
+
+  const combined = [...target, ...broad];
 
   const wsParams: Parameters<typeof wordstatTopRequests>[0] = {
     phrases: combined,
@@ -240,8 +302,13 @@ export async function POST(req: Request) {
   }
 
   const results = asTopResults(ws.data);
-  const rows: StatRow[] = [];
+  const byNorm = new Map<string, WordstatTopRequestsResult>();
+  for (const item of results) {
+    const key = normPhrase(normalizeText(item.requestPhrase));
+    if (key) byNorm.set(key, item);
+  }
 
+  const rows: StatRow[] = [];
   for (const item of results) {
     const seed = normalizeText(item.requestPhrase);
     const kind = kindByNorm.get(normPhrase(seed)) ?? "target";
@@ -267,32 +334,62 @@ export async function POST(req: Request) {
     });
   }
 
+  function demandCell(phrase: string): { display: string; value: number | null } {
+    const item = byNorm.get(normPhrase(phrase));
+    if (!item) return { display: "— (нет ответа)", value: null };
+    if (item.error) return { display: `ошибка: ${item.error}`, value: null };
+    if (item.totalCount == null) return { display: "—", value: null };
+    return { display: fmtNum(item.totalCount), value: item.totalCount };
+  }
+
+  const targetTableRows: string[][] = [];
+  let sumTarget = 0;
+  let sumBroad = 0;
+  for (let i = 0; i < target.length; i++) {
+    const { display, value } = demandCell(target[i]!);
+    if (value != null) sumTarget += value;
+    targetTableRows.push([String(i + 1), target[i]!, display]);
+  }
+  const broadTableRows: string[][] = [];
+  for (let i = 0; i < broad.length; i++) {
+    const { display, value } = demandCell(broad[i]!);
+    if (value != null) sumBroad += value;
+    broadTableRows.push([String(i + 1), broad[i]!, display]);
+  }
+
   const geoNote = isAllRussiaGeo(fact.geo)
-    ? "Запросы по всей России (регион в API не ограничивался)."
+    ? "Запросы по всей России (regions в API не передавались)."
     : regionIds?.length
       ? `Регионы Вордстата: id ${regionIds.join(", ")}.`
-      : "Регион по строке гео не сопоставился с деревом регионов API — использована вся Россия.";
+      : "Регион по строке гео не сопоставился с деревом API — фактически вся Россия.";
 
-  const step2User = `Контекст: ${geoNote}
+  const step2User = `${geoNote}
 
-Ниша: ${fact.niche}
-География (для текста стратегии): ${regionLabel}
-Продукт/услуги: ${product || "не указано"}
+Ниша: ${fact.niche}. Продукт/услуги: ${product || "—"}.
+География (текст для стратегии): ${regionLabel}.
 
-Ниже — данные Яндекс.Вордстат (метод topRequests): для каждой исходной фразы (seed) указан тип kind (target = целевой спрос, broad = более общий) и список популярных смежных запросов с полем count (условная частотность в масштабе сервиса).
+Сумма показателя «спрос» по 10 ЦЕЛЕВЫМ фразам (сумма totalCount): ${fmtNum(sumTarget)}.
+Сумма «спрос» по 30 ОБЩИМ фразам: ${fmtNum(sumBroad)}.
 
+Средний чек из фактуры (строка): ${avgCheckStr || "не указан"}.
+Число для расчёта (если распознано на сервере): ${avgCheckRub != null ? `${fmtNum(avgCheckRub)} ₽` : "не распознано"}.
+
+Детализация по фразам (seed = введённая фраза, totalCount и top — смежные запросы):
 ${JSON.stringify(rows)}
 
-Сформируй раздел «Анализ спроса и конкурентов» для маркетинговой стратегии.
+Твоя задача:
+1) Объяснить разницу целевых vs общих запросов по этим цифрам.
+2) Предложить ОДНУ реалистичную долю конверсии в оплату/сделку в процентах (conversionRatePercent), исходя из ниши, B2B/B2C, среднего чека и ширины запросов. Для узких B2B обычно доли меньше, для массового B2C выше — но всё в разумных пределах (типично 0.05%–3%).
+3) Используй для обоснования сумму по целевым как прокси «месячного интереса в поиске» — это НЕ число уникальных людей.
 
 Верни ТОЛЬКО JSON:
-{"paragraphs":["...","..."], "bullets":["...","..."]}
-
-Требования:
-- paragraphs: 3–5 абзацев по-русски; в первом абзаце кратко укажи географию и что опора на Вордстат и подбор фраз (целевые vs общие) сделан моделью по нише из ЛК.
-- объясни разницу между целевыми и общими запросами по фактическим данным;
-- bullets: 5–8 конкретных рекомендаций (SEO, контент, реклама, посадочные);
-- не придумывай числа вне переданного JSON; если по части фраз ошибки — честно упомяни ограничение выборки.`;
+{
+  "paragraphs": ["2-4 абзаца, без Markdown-таблиц"],
+  "bullets": ["5-8 рекомендаций"],
+  "conversionRatePercent": 1.0,
+  "conversionRationale": "коротко почему такой процент",
+  "demandNote": "одно предложение как читать сумму спроса"
+}`;
 
   let raw2: string;
   try {
@@ -300,13 +397,13 @@ ${JSON.stringify(rows)}
       {
         role: "system",
         content:
-          "Ты стратег по маркетингу. Пиши связно по-русски. Ответ только валидным JSON-объектом, без Markdown.",
+          "Ты финансово ориентированный маркетинг-стратег. Отвечай только валидным JSON. Не выдумывай totalCount — они уже в данных.",
       },
       { role: "user", content: step2User },
     ]);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "GigaChat";
-    return NextResponse.json({ error: `GigaChat (текст стратегии): ${msg}` }, { status: 502 });
+    return NextResponse.json({ error: `GigaChat (анализ): ${msg}` }, { status: 502 });
   }
 
   let parsed2: Record<string, unknown>;
@@ -315,30 +412,97 @@ ${JSON.stringify(rows)}
   } catch (e) {
     const msg = e instanceof Error ? e.message : "parse";
     return NextResponse.json(
-      { error: `Не удалось разобрать ответ модели (стратегия): ${msg}` },
+      { error: `Не удалось разобрать ответ модели (анализ): ${msg}` },
       { status: 502 }
     );
   }
 
-  let paragraphs = asStringList(Array.isArray(parsed2.paragraphs) ? parsed2.paragraphs : [], 8);
+  let aiParagraphs = asStringList(Array.isArray(parsed2.paragraphs) ? parsed2.paragraphs : [], 6);
   let bullets = dedupeLowerPreserveOrder(
     asStringList(Array.isArray(parsed2.bullets) ? parsed2.bullets : [], 14)
   );
 
-  if (paragraphs.length === 0) {
-    paragraphs.push(
-      "По данным Вордстата удалось получить выборку смежных запросов; сформулируйте гипотезы по контенту и рекламе и проверьте их тестами с ограниченным бюджетом."
+  const rawRate = numPercent(parsed2.conversionRatePercent, 1);
+  const conversionRatePercent = clampConversionPercent(rawRate);
+  const conversionRationale =
+    typeof parsed2.conversionRationale === "string"
+      ? parsed2.conversionRationale.trim()
+      : "оценка модели по нише и ширине запросов";
+  const demandNote =
+    typeof parsed2.demandNote === "string"
+      ? parsed2.demandNote.trim()
+      : "Сумма спроса по фразам — ориентир Яндекс.Вордстата, не число уникальных покупателей.";
+
+  if (aiParagraphs.length === 0) {
+    aiParagraphs.push(
+      "По выгрузке Вордстата видна разница частот между узкими и широкими формулировками — используйте её при планировании SEO и рекламы."
     );
   }
   if (bullets.length === 0) {
-    bullets.push("Зафиксируйте 5–10 целевых ключевых фраз из отчёта и сверьте их с коммерческим предложением на посадочной странице.");
+    bullets.push("Сверьте топовые смежные запросы из отчёта с посадочными страницами и объявлениями.");
   }
+
+  const expectedDeals = Math.round(sumTarget * (conversionRatePercent / 100));
+  const potentialRevenueRub =
+    avgCheckRub != null && Number.isFinite(expectedDeals) ? expectedDeals * avgCheckRub : null;
+
+  const intro =
+    `Данные: Яндекс.Вордстат (метод topRequests), ${regionLabel}. Число в столбце «Спрос» — ориентир месячной частотности по фразе в выбранной географии; это не аудитория «в людях» и не гарантия переходов. ${parsed1Notes ? `Заметка к подбору фраз: ${parsed1Notes}` : ""}`;
+
+  const tables: StrategyTable[] = [
+    {
+      title: `Целевые запросы (${N_TARGET} шт.) — спрос (ориентир/мес)`,
+      columns: ["№", "Запрос", "Спрос"],
+      rows: targetTableRows,
+    },
+    {
+      title: `Общие / нецелевые запросы (${N_BROAD} шт.) — спрос по каждому`,
+      columns: ["№", "Запрос", "Спрос"],
+      rows: broadTableRows,
+    },
+    {
+      title: "Оценка потенциала по фактуре (оценочно)",
+      columns: ["Показатель", "Значение"],
+      rows: [
+        ["Сумма спроса по 10 целевым фразам", `${fmtNum(sumTarget)} (сумма показателей Вордстата)`],
+        ["Сумма спроса по 30 общим фразам", `${fmtNum(sumBroad)}`],
+        ["Как читать спрос", demandNote],
+        [
+          "Принятая конверсия в оплату/сделку",
+          `${conversionRatePercent}% — ${conversionRationale}`,
+        ],
+        [
+          "Ожидаемых оплат в месяц (оценка)",
+          `${fmtNum(sumTarget)} × ${conversionRatePercent}% ≈ ${fmtNum(expectedDeals)}`,
+        ],
+        [
+          "Средний чек (фактура)",
+          avgCheckRub != null ? `${fmtNum(avgCheckRub)} ₽` : "не указан или не распознан — заполните в фактуре",
+        ],
+        [
+          "Потенциальная выручка в месяц (оценка)",
+          avgCheckRub != null && potentialRevenueRub != null
+            ? `${fmtNum(expectedDeals)} × ${fmtNum(avgCheckRub)} ₽ = ${fmtNum(potentialRevenueRub)} ₽`
+            : "— (нужен средний чек в фактуре)",
+        ],
+      ],
+    },
+  ];
+
+  const paragraphs = [intro, ...aiParagraphs];
 
   return NextResponse.json({
     regionLabel,
     regionIds: regionIds ?? null,
     allRussia: !regionIds?.length,
-    phrases: { target: targetDedup.length, broad: broad.length, requested: combined.length },
-    market: { paragraphs, bullets },
+    phrases: { target: N_TARGET, broad: N_BROAD, requested: combined.length },
+    sums: { target: sumTarget, broad: sumBroad },
+    estimate: {
+      conversionRatePercent,
+      expectedDeals,
+      averageCheckRub: avgCheckRub,
+      potentialRevenueRub,
+    },
+    market: { paragraphs, bullets, tables },
   });
 }
