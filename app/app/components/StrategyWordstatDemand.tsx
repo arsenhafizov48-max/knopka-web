@@ -8,7 +8,7 @@ import { buildStrategyDocument } from "@/app/app/lib/strategy/buildFromFact";
 import { applyWordstatMarketSection } from "@/app/app/lib/strategy/applyWordstatMarket";
 import { saveStrategy } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
-import { withBasePath } from "@/app/lib/publicBasePath";
+import { withBasePathResolved } from "@/app/lib/publicBasePath";
 
 type Props = {
   fact: ProjectFact;
@@ -27,13 +27,15 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
     setErr(null);
     setOk(null);
     try {
-      const url = `${window.location.origin}${withBasePath("/api/strategy/wordstat-demand")}`;
+      const url = `${window.location.origin}${withBasePathResolved("/api/strategy/wordstat-demand")}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fact }),
+        credentials: "same-origin",
       });
-      const data = (await res.json()) as {
+      const rawText = await res.text();
+      let data: {
         error?: string;
         market?: {
           paragraphs: string[];
@@ -44,6 +46,16 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
         phrases?: { requested: number };
         estimate?: { potentialRevenueRub: number | null };
       };
+      try {
+        data = JSON.parse(rawText) as typeof data;
+      } catch {
+        const hint =
+          rawText.trimStart().startsWith("<!") || rawText.trimStart().startsWith("<html")
+            ? "Сервер вернул HTML (часто неверный адрес API при basePath /knopka или 404). Обновите страницу и проверьте NEXT_PUBLIC_BASE_PATH на деплое."
+            : rawText.slice(0, 200);
+        setErr(hint);
+        return;
+      }
       if (!res.ok) {
         setErr(data.error || `Ошибка ${res.status}`);
         return;

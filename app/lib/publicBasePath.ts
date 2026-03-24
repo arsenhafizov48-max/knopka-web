@@ -15,3 +15,40 @@ export function withBasePath(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }
+
+/**
+ * В браузере: если NEXT_PUBLIC_BASE_PATH не попал в бандл, но сайт открыт как /knopka/app/...,
+ * выводим префикс из pathname — иначе fetch на /api/... даёт 404 HTML вместо JSON.
+ */
+function inferClientBasePathFromPathname(): string {
+  if (typeof window === "undefined") return getPublicBasePath();
+
+  const segs = window.location.pathname.split("/").filter(Boolean);
+  if (segs.length === 0) return getPublicBasePath();
+
+  if (segs[0] === "app") return "";
+
+  const knownSecond = new Set([
+    "app",
+    "login",
+    "sign-up",
+    "forgot-password",
+    "demo",
+    "dev-nav",
+    "auth",
+    "legal",
+  ]);
+  if (segs.length >= 2 && knownSecond.has(segs[1]!)) {
+    return `/${segs[0]}`;
+  }
+
+  return getPublicBasePath();
+}
+
+/** Для fetch() с клиента — путь к API/страницам с учётом basePath даже при расхождении env в бандле. */
+export function withBasePathResolved(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  if (typeof window === "undefined") return withBasePath(path);
+  const base = inferClientBasePathFromPathname();
+  return `${base}${p}`;
+}

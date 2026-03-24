@@ -8,7 +8,7 @@ import remarkGfm from "remark-gfm";
 import { Maximize2, MessageCircle, Minimize2, Paperclip, Send, X } from "lucide-react";
 
 import { getSupabaseBrowserClient } from "@/app/lib/supabaseClient";
-import { withBasePath } from "@/app/lib/publicBasePath";
+import { withBasePath, withBasePathResolved } from "@/app/lib/publicBasePath";
 import { loadStrategyThread, saveStrategyThread } from "@/app/app/lib/gigachat/strategyThreadDb";
 import type { ProjectFact } from "@/app/app/lib/projectFact";
 import { formatProjectFactForAi } from "@/app/app/lib/gigachat/formatProjectFactForAi";
@@ -227,10 +227,11 @@ export function StrategyGigaChat({
     setTurns(nextTurns);
     setLoading(true);
     try {
-      const url = `${window.location.origin}${withBasePath("/api/gigachat/chat")}`;
+      const url = `${window.location.origin}${withBasePathResolved("/api/gigachat/chat")}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({
           text: composed,
           strategyContext: strategyContext || undefined,
@@ -243,8 +244,11 @@ export function StrategyGigaChat({
       try {
         data = JSON.parse(rawText) as { reply?: string; error?: string };
       } catch {
+        const html = rawText.trimStart().startsWith("<!") || rawText.trimStart().startsWith("<html");
         throw new Error(
-          rawText.slice(0, 120) || `Сервер вернул не JSON (код ${res.status}). Проверь деплой и /api/gigachat/chat.`
+          html
+            ? `Сервер вернул HTML вместо JSON (${res.status}). Часто неверный URL API при basePath — проверьте NEXT_PUBLIC_BASE_PATH.`
+            : rawText.slice(0, 120) || `Сервер вернул не JSON (код ${res.status}).`
         );
       }
       if (!res.ok) {

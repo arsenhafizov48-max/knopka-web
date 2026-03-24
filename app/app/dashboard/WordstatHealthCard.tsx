@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { withBasePath } from "@/app/lib/publicBasePath";
+import { withBasePathResolved } from "@/app/lib/publicBasePath";
 
 type UserInfoPayload = {
   userInfo?: {
@@ -24,13 +24,25 @@ export default function WordstatHealthCard() {
     setErr(null);
     setResult(null);
     try {
-      const url = `${window.location.origin}${withBasePath("/api/wordstat")}`;
+      const url = `${window.location.origin}${withBasePathResolved("/api/wordstat")}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ op: "userInfo" }),
+        credentials: "same-origin",
       });
-      const data = (await res.json()) as UserInfoPayload;
+      const raw = await res.text();
+      let data: UserInfoPayload;
+      try {
+        data = JSON.parse(raw) as UserInfoPayload;
+      } catch {
+        setErr(
+          res.ok
+            ? "Сервер вернул не JSON. Проверьте basePath (NEXT_PUBLIC_BASE_PATH) на деплое."
+            : `Ответ не JSON (код ${res.status}).`
+        );
+        return;
+      }
       if (!res.ok) {
         if (res.status === 401) {
           setErr("Нужно войти в аккаунт — обновите страницу и авторизуйтесь.");
