@@ -14,6 +14,7 @@ import {
 } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
 import { StrategyGigaChat } from "@/app/app/components/StrategyGigaChat";
+import { StrategyWordstatDemand } from "@/app/app/components/StrategyWordstatDemand";
 
 export default function StrategyPage() {
   const [fact, setFact] = useState<ProjectFact | null>(null);
@@ -130,6 +131,8 @@ export default function StrategyPage() {
           </div>
         </div>
       </div>
+
+      <StrategyWordstatDemand fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
 
       <StrategyGigaChat doc={doc} fact={fact} />
 

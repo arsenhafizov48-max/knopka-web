@@ -1,0 +1,105 @@
+"use client";
+
+import { useState } from "react";
+import { BarChart3 } from "lucide-react";
+
+import type { ProjectFact } from "@/app/app/lib/projectFact";
+import { buildStrategyDocument } from "@/app/app/lib/strategy/buildFromFact";
+import { applyWordstatMarketSection } from "@/app/app/lib/strategy/applyWordstatMarket";
+import { saveStrategy } from "@/app/app/lib/strategy/storage";
+import type { StrategyDocument } from "@/app/app/lib/strategy/types";
+import { withBasePath } from "@/app/lib/publicBasePath";
+
+type Props = {
+  fact: ProjectFact;
+  doc: StrategyDocument | null;
+  setDoc: (d: StrategyDocument) => void;
+  gapsOk: boolean;
+};
+
+export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  const run = async () => {
+    setLoading(true);
+    setErr(null);
+    setOk(null);
+    try {
+      const url = `${window.location.origin}${withBasePath("/api/strategy/wordstat-demand")}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fact }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        market?: { paragraphs: string[]; bullets: string[] };
+        regionLabel?: string;
+        phrases?: { requested: number };
+      };
+      if (!res.ok) {
+        setErr(data.error || `Ошибка ${res.status}`);
+        return;
+      }
+      if (!data.market?.paragraphs?.length) {
+        setErr("Пустой ответ сервера");
+        return;
+      }
+      const base = doc ?? buildStrategyDocument(fact);
+      const next = applyWordstatMarketSection(
+        base,
+        data.market.paragraphs,
+        data.market.bullets ?? []
+      );
+      saveStrategy(next);
+      setDoc(next);
+      window.dispatchEvent(new Event("knopka:strategyUpdated"));
+      setOk(
+        `Раздел «Анализ спроса» обновлён: ${data.regionLabel ?? "гео"}, в Вордстат ушло ${data.phrases?.requested ?? "—"} фраз (1 ед. квоты).`
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Не удалось связаться с сервером");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-sky-200/90 bg-gradient-to-br from-sky-50/90 to-white p-5 ring-1 ring-sky-100">
+      <div className="flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-800">
+          <BarChart3 className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold text-neutral-900">Анализ спроса (Яндекс.Вордстат)</div>
+          <p className="mt-1 text-sm text-neutral-600">
+            ИИ подбирает запросы под вашу нишу из фактуры, сам делит их на целевые и общие, затем тянет
+            статистику Вордстата за период, близкий к месяцу (topRequests). География берётся из поля
+            «География» в ЛК: Россия, область или город — как вы указали.
+          </p>
+          <button
+            type="button"
+            disabled={!gapsOk || loading}
+            onClick={() => void run()}
+            className="mt-3 inline-flex items-center gap-2 rounded-2xl border border-sky-300/80 bg-white px-4 py-2.5 text-sm font-medium text-sky-950 shadow-sm hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? "Запрос к Вордстату…" : doc ? "Обновить раздел 2 по Вордстату" : "Собрать раздел 2 по Вордстату"}
+          </button>
+          {!gapsOk ? (
+            <p className="mt-2 text-xs text-neutral-500">
+              Заполните обязательные поля фактуры — без ниши и гео анализ не запускаем.
+            </p>
+          ) : null}
+          {err ? (
+            <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-800">{err}</p>
+          ) : null}
+          {ok ? (
+            <p className="mt-3 rounded-xl bg-emerald-50/90 px-3 py-2 text-xs text-emerald-950">{ok}</p>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
