@@ -68,6 +68,16 @@ const SECTIONS: { title: string; items: NavItem[] }[] = [
     ],
   },
   {
+    title: "API (сервер)",
+    items: [
+      {
+        href: "/app/dashboard",
+        label: "Яндекс Вордстат — POST /api/wordstat",
+        hint: "Только под залогиненным пользователем; в .env YANDEX_WORDSTAT_OAUTH_TOKEN. Тело JSON: { op: \"userInfo\" } или getRegionsTree, topRequests, dynamics, regions — см. app/api/wordstat/route.ts",
+      },
+    ],
+  },
+  {
     title: "Онбординг",
     items: [
       { href: "/app/onboarding/step-1", label: "Шаг 1" },

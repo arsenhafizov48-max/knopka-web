@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "wordstat:exchange-token": "node scripts/yandex-wordstat-exchange-token.mjs"
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.4.2",
