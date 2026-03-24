@@ -5,6 +5,7 @@ import { useState } from "react";
 import { FileText, MessageCircle } from "lucide-react";
 
 import AssistantDrawer from "@/app/components/AssistantDrawer";
+import CabinetNotificationsBell from "@/app/components/CabinetNotificationsBell";
 
 export default function AppTopbar() {
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -28,6 +29,8 @@ export default function AppTopbar() {
 
         {/* RIGHT */}
         <div className="flex items-center gap-2">
+          <CabinetNotificationsBell />
+
           <Link
             href="/app/fact"
             className="inline-flex items-center gap-2 rounded-full border border-neutral-200 bg-white/80 px-3 py-2 text-xs font-medium text-neutral-800 hover:bg-white"
