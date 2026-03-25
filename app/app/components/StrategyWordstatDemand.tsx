@@ -27,7 +27,8 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
     setErr(null);
     setOk(null);
     try {
-      const res = await fetch(resolveSameOriginApiUrl("/api/strategy/wordstat-demand"), {
+      const apiUrl = resolveSameOriginApiUrl("/api/strategy/wordstat-demand");
+      const res = await fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fact }),
@@ -48,11 +49,16 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
       try {
         data = JSON.parse(rawText) as typeof data;
       } catch {
-        const hint =
-          rawText.trimStart().startsWith("<!") || rawText.trimStart().startsWith("<html")
-            ? "Сервер вернул HTML (часто неверный адрес API при basePath /knopka или 404). Обновите страницу и проверьте NEXT_PUBLIC_BASE_PATH на деплое."
-            : rawText.slice(0, 200);
-        setErr(hint);
+        const isHtml =
+          rawText.trimStart().startsWith("<!") || rawText.trimStart().toLowerCase().startsWith("<html");
+        if (isHtml) {
+          setErr(
+            `Ответ не JSON (код ${res.status}), запрос шёл на: ${apiUrl}. ` +
+              `Если в адресе сайта есть префикс после домена (например /кнопка), в Vercel в Environment Variables добавьте NEXT_PUBLIC_BASE_PATH ровно с этим префиксом и сделайте Redeploy — без этого Next не вешает /api на этот путь.`
+          );
+        } else {
+          setErr(rawText.slice(0, 220));
+        }
         return;
       }
       if (!res.ok) {

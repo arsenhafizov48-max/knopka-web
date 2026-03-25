@@ -1,7 +1,6 @@
 /**
- * Префикс приложения на проде (например /knopka на https://metlab-a.ru/knopka).
- * Должен совпадать с basePath в next.config.ts.
- * Локально в .env.local оставь пустым или не задавай.
+ * Префикс приложения на проде (например /knopka на https://домен/knopka).
+ * Должен совпадать с basePath в next.config.ts (переменная NEXT_PUBLIC_BASE_PATH при сборке).
  */
 export function getPublicBasePath(): string {
   const raw = process.env.NEXT_PUBLIC_BASE_PATH?.trim() ?? "";
@@ -9,18 +8,14 @@ export function getPublicBasePath(): string {
   return raw.startsWith("/") ? raw.replace(/\/$/, "") : `/${raw.replace(/\/$/, "")}`;
 }
 
-/** Путь с префиксом: "/login" → "/knopka/login" */
+/** Путь с префиксом из env (сервер / статический бандл). */
 export function withBasePath(path: string): string {
   const base = getPublicBasePath();
   const p = path.startsWith("/") ? path : `/${path}`;
   return `${base}${p}`;
 }
 
-/**
- * Первый сегмент URL после домена — это basePath, если это НЕ корневой маршрут Next-приложения.
- * Так работает и /knopka/app/strategy, и /кнопка/onboarding/step-1, и /кнопка/fact (раньше ломалось:
- * второй сегмент не был в whitelist → падали на пустой env → fetch на /api/... → HTML 404).
- */
+/** Сегменты, с которых начинается приложение БЕЗ внешнего basePath. */
 const PATH_ROOT_FIRST_SEGMENTS = new Set([
   "app",
   "login",
@@ -34,85 +29,54 @@ const PATH_ROOT_FIRST_SEGMENTS = new Set([
   "api",
 ]);
 
-function inferClientBasePathFromPathname(): string {
+type WindowWithBase = Window & { __KNOPKA_BASE_PATH__?: string | null };
+
+/**
+ * Префикс путей для fetch в браузере (должен совпадать с basePath в next.config).
+ *
+ * 1) window.__KNOPKA_BASE_PATH__ из root layout — значение с сервера при сборке.
+ * 2) Иначе первый сегмент URL, если это не app/login/… (подходит для /кнопка/app/…).
+ * 3) Иначе пусто или getPublicBasePath() из бандла.
+ */
+export function getClientFetchBasePath(): string {
   if (typeof window === "undefined") return getPublicBasePath();
+
+  const w = window as WindowWithBase;
+  if (
+    "__KNOPKA_BASE_PATH__" in w &&
+    typeof w.__KNOPKA_BASE_PATH__ === "string" &&
+    w.__KNOPKA_BASE_PATH__.length > 0
+  ) {
+    return w.__KNOPKA_BASE_PATH__.replace(/\/$/, "");
+  }
 
   const parts = window.location.pathname.split("/").filter(Boolean);
   if (parts.length === 0) return getPublicBasePath();
 
   const head = parts[0]!;
   if (PATH_ROOT_FIRST_SEGMENTS.has(head)) {
-    return "";
+    return getPublicBasePath();
   }
 
   return `/${head}`;
 }
 
-type WindowWithBase = Window & { __KNOPKA_BASE_PATH__?: string | null };
-
-/**
- * Непустая строка — префикс из билда (как next.config).
- * null — в билде префикса нет, смотрим URL.
- * undefined — скрипт не выполнился.
- */
-function getBasePathFromDocument(): string | null | undefined {
-  if (typeof window === "undefined") return undefined;
-  if (!("__KNOPKA_BASE_PATH__" in (window as WindowWithBase))) return undefined;
-  const v = (window as WindowWithBase).__KNOPKA_BASE_PATH__;
-  if (v === null) return null;
-  if (typeof v === "string" && v.length > 0) return v;
-  return undefined;
-}
-
-/** Для fetch() с клиента — путь к API/страницам с учётом basePath. */
+/** Путь с префиксом на клиенте (страницы, ссылки, если нужен полный путь). */
 export function withBasePathResolved(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
   if (typeof window === "undefined") return withBasePath(path);
-
-  const fromDoc = getBasePathFromDocument();
-  if (typeof fromDoc === "string") {
-    return `${fromDoc}${p}`;
-  }
-
-  const base = inferClientBasePathFromPathname();
-  return `${base}${p}`;
+  return `${getClientFetchBasePath()}${p}`;
 }
 
-/**
- * Абсолютный URL для fetch к Route Handlers /api/* на том же origin.
- * Считается через относительный путь от текущей страницы — не зависит от NEXT_PUBLIC_BASE_PATH
- * в клиентском чанке и корректно работает с кириллическим basePath (/кнопка/...).
- */
+/** Полный URL для Route Handlers /api/* на текущем origin. */
 export function resolveSameOriginApiUrl(apiPath: string): string {
   const p = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
-  if (!p.startsWith("/api")) {
-    return typeof window !== "undefined"
-      ? `${window.location.origin}${withBasePathResolved(p)}`
-      : `${getPublicBasePath()}${p}`;
-  }
-
   if (typeof window === "undefined") {
     return `${getPublicBasePath()}${p}`;
   }
-
-  const origin = window.location.origin;
-  const pathname = window.location.pathname.replace(/\/$/, "") || "/";
-  const parts = pathname.split("/").filter(Boolean);
-
-  if (parts.length === 0) {
-    return `${origin}${getPublicBasePath()}${p}`;
+  if (!p.startsWith("/api")) {
+    return `${window.location.origin}${withBasePathResolved(p)}`;
   }
-
-  const first = parts[0]!;
-  const ups = PATH_ROOT_FIRST_SEGMENTS.has(first) ? parts.length : parts.length - 1;
-  const tail = p.replace(/^\/api\/?/, "");
-  const upPart = ups > 0 ? "../".repeat(ups) : "";
-  const rel = tail ? `${upPart}api/${tail}` : `${upPart}api`;
-
-  const baseDirUrl = `${origin}${pathname}/`;
-  try {
-    return new URL(rel, baseDirUrl).href;
-  } catch {
-    return `${origin}${withBasePathResolved(p)}`;
-  }
+  const base = getClientFetchBasePath();
+  return `${window.location.origin}${base}${p}`;
 }

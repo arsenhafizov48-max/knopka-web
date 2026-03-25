@@ -1,10 +1,10 @@
-# Деплой КНОПКА по пути `/knopka` (пример: metlab-a.ru)
+# Деплой КНОПКА по пути `/knopka` (подпапка на своём домене)
 
-Сайт агентства: [metlab-a.ru](https://metlab-a.ru/). Приложение Next.js вешается **в подпапку**, например `https://metlab-a.ru/knopka`.
+Если основной сайт уже занят (WordPress, лендинг и т.д.), приложение Next.js можно повесить **в подпапку**, например `https://ваш-домен.ru/knopka`. Ниже — шаблон настроек; подставь **свой** домен и префикс, никакие чужие URL в код не подставляются.
 
 ## 1. Переменные окружения на сервере
 
-Создай `.env.production` или задай переменные в панели хостинга / PM2:
+Создай `.env.production` или задай переменные в панели хостинга / PM2 / Vercel:
 
 ```env
 NEXT_PUBLIC_BASE_PATH=/knopka
@@ -43,7 +43,7 @@ pm2 save
 
 ## 3. Nginx: прокси на Next с префиксом `/knopka`
 
-Запросы с `https://metlab-a.ru/knopka/...` должны уходить на Node **с тем же путём** (у Next включён `basePath: '/knopka'`).
+Запросы с `https://ваш-домен.ru/knopka/...` должны уходить на Node **с тем же путём** (у Next включён `basePath: '/knopka'`).
 
 Пример фрагмента `server` для SSL-сайта:
 
@@ -70,17 +70,17 @@ location /knopka/ {
 
 | Поле | Значение |
 |------|----------|
-| **Site URL** | `https://metlab-a.ru/knopka` |
-| **Redirect URLs** | `https://metlab-a.ru/knopka/auth/callback` |
+| **Site URL** | `https://ваш-домен.ru/knopka` |
+| **Redirect URLs** | `https://ваш-домен.ru/knopka/auth/callback` |
 
 Добавь тот же callback в **Google / Yandex / VK** OAuth (если используешь), в поля redirect URI у провайдера.
 
 ## 5. Проверка
 
-1. Открой `https://metlab-a.ru/knopka` — главная лендинга или редирект как у тебя настроен.
-2. `https://metlab-a.ru/knopka/login` — вход.
+1. Открой `https://ваш-домен.ru/knopka` — как настроишь редиректы/главную.
+2. `https://ваш-домен.ru/knopka/login` — вход.
 3. OAuth и письма должны возвращать на `.../knopka/auth/callback`.
 
 ## Альтернатива без подпапки
 
-Если хостер проще даёт **поддомен** (`knopka.metlab-a.ru`), можно **не** задавать `NEXT_PUBLIC_BASE_PATH`, повесить DNS на Vercel/сервер и в Supabase указать `https://knopka.metlab-a.ru` — меньше возни с nginx и одним сайтом на WordPress.
+Если проще выдать **поддомен** (`knopka.ваш-домен.ru`), можно **не** задавать `NEXT_PUBLIC_BASE_PATH`, повесить DNS на Vercel/сервер и в Supabase указать `https://knopka.ваш-домен.ru` — тогда приложение с корня поддомена, без префикса в пути.
