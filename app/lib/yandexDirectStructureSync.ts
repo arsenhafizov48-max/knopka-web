@@ -2,10 +2,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureYandexDirectAccessToken } from "@/app/lib/yandexDirectEnsureToken";
 import { directGetAllPages } from "@/app/lib/yandexDirectJsonRpc";
+import { getYandexLogin } from "@/app/lib/yandexPassportLogin";
 
 export type YandexSnapshotPayloadV1 = {
   version: 1;
   syncedAt: string;
+  /** Логин для Client-Login в Direct API (если удалось получить с login.yandex.ru). */
+  yandexLogin?: string | null;
   campaigns: unknown[];
   adGroups: unknown[];
   ads: unknown[];
@@ -88,39 +91,48 @@ async function safeGetAll<K extends string, T>(
 }
 
 /** Убираем поля, которые API не отдаёт для части аккаунтов — повтор с укороченным списком. */
-async function getCampaignsWithFallback(token: string): Promise<unknown[]> {
+async function getCampaignsWithFallback(
+  token: string,
+  clientLogin: string | null
+): Promise<unknown[]> {
   try {
-    return await directGetAllPages("campaigns", "Campaigns", CAMPAIGN_FIELDS, token);
+    return await directGetAllPages("campaigns", "Campaigns", CAMPAIGN_FIELDS, token, {}, clientLogin);
   } catch {
     const minimal = ["Id", "Name", "Type", "Status", "State", "DailyBudget", "Currency"];
-    return directGetAllPages("campaigns", "Campaigns", minimal, token);
+    return directGetAllPages("campaigns", "Campaigns", minimal, token, {}, clientLogin);
   }
 }
 
-async function getAdGroupsWithFallback(token: string): Promise<unknown[]> {
+async function getAdGroupsWithFallback(
+  token: string,
+  clientLogin: string | null
+): Promise<unknown[]> {
   try {
-    return await directGetAllPages("adgroups", "AdGroups", ADGROUP_FIELDS, token);
+    return await directGetAllPages("adgroups", "AdGroups", ADGROUP_FIELDS, token, {}, clientLogin);
   } catch {
     const minimal = ["Id", "Name", "CampaignId", "Status", "State"];
-    return directGetAllPages("adgroups", "AdGroups", minimal, token);
+    return directGetAllPages("adgroups", "AdGroups", minimal, token, {}, clientLogin);
   }
 }
 
-async function getAdsWithFallback(token: string): Promise<unknown[]> {
+async function getAdsWithFallback(token: string, clientLogin: string | null): Promise<unknown[]> {
   try {
-    return await directGetAllPages("ads", "Ads", AD_FIELDS, token);
+    return await directGetAllPages("ads", "Ads", AD_FIELDS, token, {}, clientLogin);
   } catch {
     const minimal = ["Id", "AdGroupId", "CampaignId", "Status", "State", "Type"];
-    return directGetAllPages("ads", "Ads", minimal, token);
+    return directGetAllPages("ads", "Ads", minimal, token, {}, clientLogin);
   }
 }
 
-async function getKeywordsWithFallback(token: string): Promise<unknown[]> {
+async function getKeywordsWithFallback(
+  token: string,
+  clientLogin: string | null
+): Promise<unknown[]> {
   try {
-    return await directGetAllPages("keywords", "Keywords", KEYWORD_FIELDS, token);
+    return await directGetAllPages("keywords", "Keywords", KEYWORD_FIELDS, token, {}, clientLogin);
   } catch {
     const minimal = ["Id", "AdGroupId", "CampaignId", "Keyword", "State", "Status", "Bid"];
-    return directGetAllPages("keywords", "Keywords", minimal, token);
+    return directGetAllPages("keywords", "Keywords", minimal, token, {}, clientLogin);
   }
 }
 
@@ -130,18 +142,20 @@ export async function syncYandexDirectStructure(
 ): Promise<{ ok: true; payload: YandexSnapshotPayloadV1 } | { ok: false; message: string }> {
   try {
     const token = await ensureYandexDirectAccessToken(admin, userId);
+    const clientLogin = await getYandexLogin(token).catch(() => null);
 
     const [campaigns, adGroups, ads, keywords] = await Promise.all([
-      safeGetAll("Кампании", () => getCampaignsWithFallback(token)),
-      safeGetAll("Группы", () => getAdGroupsWithFallback(token)),
-      safeGetAll("Объявления", () => getAdsWithFallback(token)),
-      safeGetAll("Ключевые фразы", () => getKeywordsWithFallback(token)),
+      safeGetAll("Кампании", () => getCampaignsWithFallback(token, clientLogin)),
+      safeGetAll("Группы", () => getAdGroupsWithFallback(token, clientLogin)),
+      safeGetAll("Объявления", () => getAdsWithFallback(token, clientLogin)),
+      safeGetAll("Ключевые фразы", () => getKeywordsWithFallback(token, clientLogin)),
     ]);
 
     const syncedAt = new Date().toISOString();
     const payload: YandexSnapshotPayloadV1 = {
       version: 1,
       syncedAt,
+      yandexLogin: clientLogin,
       campaigns,
       adGroups,
       ads,

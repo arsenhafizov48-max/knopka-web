@@ -14,16 +14,22 @@ export async function directJsonRpc<T>(
   service: DirectService,
   method: string,
   params: Record<string, unknown>,
-  accessToken: string
+  accessToken: string,
+  clientLogin?: string | null
 ): Promise<T> {
   const url = `${DIRECT_JSON_BASE}/${service}`;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    "Accept-Language": "ru",
+    "Content-Type": "application/json; charset=utf-8",
+  };
+  if (clientLogin) {
+    headers["Client-Login"] = clientLogin;
+  }
+
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Accept-Language": "ru",
-      "Content-Type": "application/json; charset=utf-8",
-    },
+    headers,
     body: JSON.stringify({ method, params }),
   });
 
@@ -50,7 +56,8 @@ export async function directGetAllPages<K extends string, T>(
   resultKey: K,
   fieldNames: string[],
   accessToken: string,
-  extraParams: Record<string, unknown> = {}
+  extraParams: Record<string, unknown> = {},
+  clientLogin?: string | null
 ): Promise<T[]> {
   const out: T[] = [];
   let offset = 0;
@@ -65,7 +72,8 @@ export async function directGetAllPages<K extends string, T>(
         Page: { Limit: PAGE_LIMIT, Offset: offset },
         ...extraParams,
       },
-      accessToken
+      accessToken,
+      clientLogin
     );
 
     const batch = result[resultKey] ?? [];
