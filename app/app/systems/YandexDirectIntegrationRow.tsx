@@ -32,6 +32,8 @@ type SnapshotInfo = {
   counts: { campaigns: number; adGroups: number; ads: number; keywords: number } | null;
 };
 
+type YandexAccount = { login: string | null; email: string | null };
+
 type YandexState =
   | { kind: "loading" }
   | {
@@ -39,6 +41,7 @@ type YandexState =
       connected: boolean;
       expiresAt: string | null;
       serverError?: string;
+      yandexAccount: YandexAccount | null;
       snapshot: SnapshotInfo | null;
     }
   | { kind: "error"; message: string };
@@ -63,6 +66,7 @@ export function YandexDirectIntegrationRow() {
           authenticated?: boolean;
           expiresAt?: string | null;
           error?: string;
+          yandexAccount?: YandexAccount | null;
           snapshot?: {
             syncedAt: string | null;
             status: string | null;
@@ -76,20 +80,32 @@ export function YandexDirectIntegrationRow() {
             connected: false,
             expiresAt: null,
             serverError: j.error || `HTTP ${res.status}`,
+            yandexAccount: null,
             snapshot: null,
           });
           return;
         }
         if (!j.authenticated) {
-          setSt({ kind: "ok", connected: false, expiresAt: null, snapshot: null });
+          setSt({
+            kind: "ok",
+            connected: false,
+            expiresAt: null,
+            yandexAccount: null,
+            snapshot: null,
+          });
           return;
         }
         const snap = j.snapshot;
+        const ya = j.yandexAccount;
         setSt({
           kind: "ok",
           connected: !!j.connected,
           expiresAt: j.expiresAt ?? null,
           serverError: j.error,
+          yandexAccount:
+            ya && (ya.email || ya.login)
+              ? { login: ya.login ?? null, email: ya.email ?? null }
+              : null,
           snapshot: snap
             ? {
                 syncedAt: snap.syncedAt ?? null,
@@ -201,6 +217,7 @@ export function YandexDirectIntegrationRow() {
 
   let pill: { status: Status; text: string };
   let meta: string;
+  let accountLine: string | null = null;
 
   if (st.kind === "loading") {
     pill = { status: "manual", text: "Проверка…" };
@@ -215,6 +232,16 @@ export function YandexDirectIntegrationRow() {
     pill = { status: "disconnected", text: "Не подключено" };
     meta = "OAuth: доступ к API Директа для вашего аккаунта.";
   } else {
+    const ya = st.yandexAccount;
+    if (ya) {
+      if (ya.email && ya.login) {
+        accountLine = `${ya.email} (@${ya.login})`;
+      } else if (ya.email) {
+        accountLine = ya.email;
+      } else if (ya.login) {
+        accountLine = `@${ya.login}`;
+      }
+    }
     const snap = st.snapshot;
     const isPartial = snap?.status === "partial";
     pill = isPartial
@@ -277,6 +304,11 @@ export function YandexDirectIntegrationRow() {
               <div className="font-medium">Яндекс Директ</div>
               <div className="text-xs text-neutral-500">Реклама</div>
             </div>
+            {st.kind === "ok" && st.connected && accountLine ? (
+              <div className="mt-0.5 text-xs text-neutral-800">
+                Подключён аккаунт: <span className="font-medium">{accountLine}</span>
+              </div>
+            ) : null}
             <div className="mt-1 text-xs text-neutral-500">{meta}</div>
           </div>
         </div>

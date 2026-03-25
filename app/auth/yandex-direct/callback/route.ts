@@ -8,6 +8,7 @@ import {
   getYandexDirectRedirectUri,
   YANDEX_DIRECT_OAUTH_STATE_COOKIE,
 } from "@/app/lib/yandexDirectOAuth";
+import { getYandexPassportProfile } from "@/app/lib/yandexPassportLogin";
 
 function systemsRedirect(origin: string, query: Record<string, string>) {
   const q = new URLSearchParams(query).toString();
@@ -111,6 +112,8 @@ export async function GET(request: Request) {
 
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
+  const passport = await getYandexPassportProfile(accessToken).catch(() => null);
+
   const { error: upsertError } = await admin.from("yandex_direct_oauth").upsert(
     {
       user_id: user.id,
@@ -118,6 +121,8 @@ export async function GET(request: Request) {
       refresh_token: refreshToken,
       expires_at: expiresAt,
       updated_at: new Date().toISOString(),
+      yandex_login: passport?.login ?? null,
+      yandex_email: passport?.defaultEmail ?? null,
     },
     { onConflict: "user_id" }
   );

@@ -25,7 +25,7 @@ export async function GET() {
 
   const { data, error } = await admin
     .from("yandex_direct_oauth")
-    .select("expires_at, updated_at")
+    .select("expires_at, updated_at, yandex_login, yandex_email")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -49,11 +49,24 @@ export async function GET() {
       ? payload.counts
       : null;
 
+  const yandexLogin =
+    data && typeof (data as { yandex_login?: unknown }).yandex_login === "string"
+      ? (data as { yandex_login: string }).yandex_login
+      : null;
+  const yandexEmail =
+    data && typeof (data as { yandex_email?: unknown }).yandex_email === "string"
+      ? (data as { yandex_email: string }).yandex_email
+      : null;
+
   return NextResponse.json({
     connected: !!data,
     authenticated: true,
     expiresAt: data?.expires_at ?? null,
     updatedAt: data?.updated_at ?? null,
+    yandexAccount:
+      data && (yandexLogin || yandexEmail)
+        ? { login: yandexLogin, email: yandexEmail }
+        : null,
     snapshot: snap
       ? {
           syncedAt: snap.synced_at,

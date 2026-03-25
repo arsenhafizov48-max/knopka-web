@@ -24,7 +24,8 @@
 Чтобы на странице **«Системы и данные»** работало подключение Директа (токены в БД, без чтения из браузера):
 
 1. SQL Editor → выполни **`migrations/003_yandex_direct_oauth.sql`**.
-2. На Vercel задай **`SUPABASE_SERVICE_ROLE_KEY`** и переменные **`YANDEX_DIRECT_OAUTH_CLIENT_*`** (см. `.env.example`).
+2. После обновления приложения выполни **`migrations/005_yandex_direct_oauth_profile.sql`** — колонки почты и логина Яндекса для подписи в блоке интеграции.
+3. На Vercel задай **`SUPABASE_SERVICE_ROLE_KEY`** и переменные **`YANDEX_DIRECT_OAUTH_CLIENT_*`** (см. `.env.example`).
 
 ## Снимок структуры Директа (`yandex_direct_snapshot`)
 

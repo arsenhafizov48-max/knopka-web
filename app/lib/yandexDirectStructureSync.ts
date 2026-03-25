@@ -2,13 +2,15 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureYandexDirectAccessToken } from "@/app/lib/yandexDirectEnsureToken";
 import { directGetAllPages } from "@/app/lib/yandexDirectJsonRpc";
-import { getYandexLogin } from "@/app/lib/yandexPassportLogin";
+import { getYandexPassportProfile } from "@/app/lib/yandexPassportLogin";
 
 export type YandexSnapshotPayloadV1 = {
   version: 1;
   syncedAt: string;
   /** Логин для Client-Login в Direct API (если удалось получить с login.yandex.ru). */
   yandexLogin?: string | null;
+  /** Основная почта Яндекс ID (для подписи в UI). */
+  yandexEmail?: string | null;
   /** Части выгрузки, которые API не отдал (остальное в снимке есть). */
   syncWarnings?: string[];
   campaigns: unknown[];
@@ -143,28 +145,68 @@ async function getKeywordsWithFallback(
   }
 }
 
+function isUnfinishedRegistrationWarning(msg: string): boolean {
+  const s = msg.toLowerCase();
+  return s.includes("незаверш") && s.includes("регистрац");
+}
+
+function allWarningsUnfinishedRegistration(warnings: string[]): boolean {
+  return warnings.length > 0 && warnings.every(isUnfinishedRegistrationWarning);
+}
+
+async function pullStructure(token: string, clientLogin: string | null) {
+  const [rCamp, rAg, rAds, rKw] = await Promise.all([
+    tryGetAll("Кампании", () => getCampaignsWithFallback(token, clientLogin)),
+    tryGetAll("Группы", () => getAdGroupsWithFallback(token, clientLogin)),
+    tryGetAll("Объявления", () => getAdsWithFallback(token, clientLogin)),
+    tryGetAll("Ключевые фразы", () => getKeywordsWithFallback(token, clientLogin)),
+  ]);
+
+  const warnings: string[] = [];
+  const campaigns = rCamp.ok ? rCamp.data : (warnings.push(rCamp.warning), []);
+  const adGroups = rAg.ok ? rAg.data : (warnings.push(rAg.warning), []);
+  const ads = rAds.ok ? rAds.data : (warnings.push(rAds.warning), []);
+  const keywords = rKw.ok ? rKw.data : (warnings.push(rKw.warning), []);
+  const allFailed = !rCamp.ok && !rAg.ok && !rAds.ok && !rKw.ok;
+
+  return { campaigns, adGroups, ads, keywords, warnings, allFailed };
+}
+
 export async function syncYandexDirectStructure(
   admin: SupabaseClient,
   userId: string
 ): Promise<{ ok: true; payload: YandexSnapshotPayloadV1 } | { ok: false; message: string }> {
   try {
     const token = await ensureYandexDirectAccessToken(admin, userId);
-    const clientLogin = await getYandexLogin(token).catch(() => null);
 
-    const [rCamp, rAg, rAds, rKw] = await Promise.all([
-      tryGetAll("Кампании", () => getCampaignsWithFallback(token, clientLogin)),
-      tryGetAll("Группы", () => getAdGroupsWithFallback(token, clientLogin)),
-      tryGetAll("Объявления", () => getAdsWithFallback(token, clientLogin)),
-      tryGetAll("Ключевые фразы", () => getKeywordsWithFallback(token, clientLogin)),
-    ]);
+    const { data: oauthRow } = await admin
+      .from("yandex_direct_oauth")
+      .select("yandex_login, yandex_email")
+      .eq("user_id", userId)
+      .maybeSingle();
 
-    const warnings: string[] = [];
-    const campaigns = rCamp.ok ? rCamp.data : (warnings.push(rCamp.warning), []);
-    const adGroups = rAg.ok ? rAg.data : (warnings.push(rAg.warning), []);
-    const ads = rAds.ok ? rAds.data : (warnings.push(rAds.warning), []);
-    const keywords = rKw.ok ? rKw.data : (warnings.push(rKw.warning), []);
+    const profile = await getYandexPassportProfile(token).catch(() => null);
+    if (profile && (profile.login || profile.defaultEmail)) {
+      const patch: Record<string, string> = { updated_at: new Date().toISOString() };
+      if (profile.login) patch.yandex_login = profile.login;
+      if (profile.defaultEmail) patch.yandex_email = profile.defaultEmail;
+      await admin.from("yandex_direct_oauth").update(patch).eq("user_id", userId);
+    }
 
-    const allFailed = !rCamp.ok && !rAg.ok && !rAds.ok && !rKw.ok;
+    type OauthRow = { yandex_login?: string | null; yandex_email?: string | null } | null;
+    const row = oauthRow as OauthRow;
+    const displayLogin = profile?.login ?? row?.yandex_login ?? null;
+    const displayEmail = profile?.defaultEmail ?? row?.yandex_email ?? null;
+
+    let clientLoginForApi = displayLogin;
+    let pack = await pullStructure(token, clientLoginForApi);
+
+    if (pack.allFailed && clientLoginForApi && allWarningsUnfinishedRegistration(pack.warnings)) {
+      pack = await pullStructure(token, null);
+    }
+
+    const { campaigns, adGroups, ads, keywords, warnings, allFailed } = pack;
+
     if (allFailed) {
       const message = warnings.join(" · ");
       const syncedAt = new Date().toISOString();
@@ -174,7 +216,8 @@ export async function syncYandexDirectStructure(
           payload: {
             version: 1,
             syncedAt,
-            yandexLogin: clientLogin,
+            yandexLogin: displayLogin,
+            yandexEmail: displayEmail,
             syncWarnings: warnings,
             campaigns,
             adGroups,
@@ -195,7 +238,8 @@ export async function syncYandexDirectStructure(
     const payload: YandexSnapshotPayloadV1 = {
       version: 1,
       syncedAt,
-      yandexLogin: clientLogin,
+      yandexLogin: displayLogin,
+      yandexEmail: displayEmail,
       syncWarnings: warnings.length > 0 ? warnings : undefined,
       campaigns,
       adGroups,
