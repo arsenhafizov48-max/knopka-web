@@ -50,7 +50,7 @@ const ICON = {
 
 export function YandexDirectIntegrationRow() {
   const [st, setSt] = useState<YandexState>({ kind: "loading" });
-  const [flash, setFlash] = useState<{ text: string; kind: "ok" | "err" } | null>(null);
+  const [flash, setFlash] = useState<{ text: string; kind: "ok" | "err" | "warn" } | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
@@ -150,6 +150,8 @@ export function YandexDirectIntegrationRow() {
       const j = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         error?: string;
+        partial?: boolean;
+        warnings?: string[];
         counts?: SnapshotInfo["counts"];
       };
       if (!res.ok) {
@@ -161,7 +163,14 @@ export function YandexDirectIntegrationRow() {
         const line = c
           ? `Снимок обновлён: кампаний ${c.campaigns}, групп ${c.adGroups}, объявлений ${c.ads}, фраз ${c.keywords}.`
           : "Снимок обновлён.";
-        setFlash({ text: line, kind: "ok" });
+        if (j.partial && j.warnings?.length) {
+          setFlash({
+            text: `${line} Не выгрузили: ${j.warnings.join(" ")}`,
+            kind: "warn",
+          });
+        } else {
+          setFlash({ text: line, kind: "ok" });
+        }
       } else {
         setFlash({ text: j.error || "Синхронизация не удалась", kind: "err" });
       }
@@ -206,11 +215,14 @@ export function YandexDirectIntegrationRow() {
     pill = { status: "disconnected", text: "Не подключено" };
     meta = "OAuth: доступ к API Директа для вашего аккаунта.";
   } else {
-    pill = { status: "connected", text: "Подключено" };
+    const snap = st.snapshot;
+    const isPartial = snap?.status === "partial";
+    pill = isPartial
+      ? { status: "partial", text: "Частично" }
+      : { status: "connected", text: "Подключено" };
     const tokenLine = st.expiresAt
       ? `Токен до ${new Date(st.expiresAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}.`
       : "Аккаунт привязан.";
-    const snap = st.snapshot;
     let snapLine = " Снимок структуры: ещё не выгружали — нажмите «Синхронизировать».";
     if (snap?.syncedAt) {
       const t = new Date(snap.syncedAt).toLocaleString("ru-RU", {
@@ -219,6 +231,12 @@ export function YandexDirectIntegrationRow() {
       });
       if (snap.status === "error" && snap.errorMessage) {
         snapLine = ` Последняя выгрузка ${t}: ошибка — ${snap.errorMessage}`;
+      } else if (isPartial && snap.errorMessage) {
+        const c = snap.counts;
+        const cnt = c
+          ? `кампаний ${c.campaigns}, групп ${c.adGroups}, объявлений ${c.ads}, фраз ${c.keywords}. `
+          : "";
+        snapLine = ` Выгрузка ${t}: ${cnt}Не всё выгрузилось: ${snap.errorMessage}`;
       } else if (snap.counts) {
         snapLine = ` Выгрузка ${t}: кампаний ${snap.counts.campaigns}, групп ${snap.counts.adGroups}, объявлений ${snap.counts.ads}, фраз ${snap.counts.keywords}.`;
       } else {
@@ -235,7 +253,9 @@ export function YandexDirectIntegrationRow() {
           className={
             flash.kind === "ok"
               ? "rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900"
-              : "rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900"
+              : flash.kind === "warn"
+                ? "rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950"
+                : "rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900"
           }
           role="status"
         >

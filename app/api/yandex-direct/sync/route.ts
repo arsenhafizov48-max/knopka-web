@@ -9,12 +9,25 @@ async function syncAllOAuthUsers() {
   const { data: rows, error } = await admin.from("yandex_direct_oauth").select("user_id");
   if (error) throw new Error(error.message);
 
-  const results: Array<{ user_id: string; ok: boolean; error?: string; counts?: unknown }> = [];
+  const results: Array<{
+    user_id: string;
+    ok: boolean;
+    error?: string;
+    counts?: unknown;
+    partial?: boolean;
+    warnings?: string[];
+  }> = [];
   for (const row of rows ?? []) {
     const uid = row.user_id as string;
     const r = await syncYandexDirectStructure(admin, uid);
     if (r.ok) {
-      results.push({ user_id: uid, ok: true, counts: r.payload.counts });
+      results.push({
+        user_id: uid,
+        ok: true,
+        counts: r.payload.counts,
+        partial: Boolean(r.payload.syncWarnings?.length),
+        warnings: r.payload.syncWarnings,
+      });
     } else {
       results.push({ user_id: uid, ok: false, error: r.message });
     }
@@ -66,9 +79,12 @@ async function runSync(request: Request) {
     return NextResponse.json({ ok: false, error: r.message });
   }
 
+  const warnings = r.payload.syncWarnings;
   return NextResponse.json({
     ok: true,
     counts: r.payload.counts,
     syncedAt: r.payload.syncedAt,
+    partial: Boolean(warnings?.length),
+    warnings: warnings ?? [],
   });
 }

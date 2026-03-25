@@ -9,6 +9,8 @@ export type YandexSnapshotPayloadV1 = {
   syncedAt: string;
   /** Логин для Client-Login в Direct API (если удалось получить с login.yandex.ru). */
   yandexLogin?: string | null;
+  /** Части выгрузки, которые API не отдал (остальное в снимке есть). */
+  syncWarnings?: string[];
   campaigns: unknown[];
   adGroups: unknown[];
   ads: unknown[];
@@ -78,15 +80,15 @@ const KEYWORD_FIELDS = [
   "UserParam2",
 ];
 
-async function safeGetAll<K extends string, T>(
-  label: string,
-  fn: () => Promise<T[]>
-): Promise<T[]> {
+async function tryGetAll(label: string, fn: () => Promise<unknown[]>): Promise<
+  { ok: true; data: unknown[] } | { ok: false; warning: string }
+> {
   try {
-    return await fn();
+    const data = await fn();
+    return { ok: true, data };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    throw new Error(`${label}: ${msg}`);
+    return { ok: false, warning: `${label}: ${msg}` };
   }
 }
 
@@ -116,11 +118,16 @@ async function getAdGroupsWithFallback(
 }
 
 async function getAdsWithFallback(token: string, clientLogin: string | null): Promise<unknown[]> {
+  const minimal = ["Id", "AdGroupId", "CampaignId", "Status", "State", "Type"];
+  const bare = ["Id", "AdGroupId", "CampaignId"];
   try {
     return await directGetAllPages("ads", "Ads", AD_FIELDS, token, {}, clientLogin);
   } catch {
-    const minimal = ["Id", "AdGroupId", "CampaignId", "Status", "State", "Type"];
-    return directGetAllPages("ads", "Ads", minimal, token, {}, clientLogin);
+    try {
+      return await directGetAllPages("ads", "Ads", minimal, token, {}, clientLogin);
+    } catch {
+      return await directGetAllPages("ads", "Ads", bare, token, {}, clientLogin);
+    }
   }
 }
 
@@ -144,18 +151,52 @@ export async function syncYandexDirectStructure(
     const token = await ensureYandexDirectAccessToken(admin, userId);
     const clientLogin = await getYandexLogin(token).catch(() => null);
 
-    const [campaigns, adGroups, ads, keywords] = await Promise.all([
-      safeGetAll("Кампании", () => getCampaignsWithFallback(token, clientLogin)),
-      safeGetAll("Группы", () => getAdGroupsWithFallback(token, clientLogin)),
-      safeGetAll("Объявления", () => getAdsWithFallback(token, clientLogin)),
-      safeGetAll("Ключевые фразы", () => getKeywordsWithFallback(token, clientLogin)),
+    const [rCamp, rAg, rAds, rKw] = await Promise.all([
+      tryGetAll("Кампании", () => getCampaignsWithFallback(token, clientLogin)),
+      tryGetAll("Группы", () => getAdGroupsWithFallback(token, clientLogin)),
+      tryGetAll("Объявления", () => getAdsWithFallback(token, clientLogin)),
+      tryGetAll("Ключевые фразы", () => getKeywordsWithFallback(token, clientLogin)),
     ]);
+
+    const warnings: string[] = [];
+    const campaigns = rCamp.ok ? rCamp.data : (warnings.push(rCamp.warning), []);
+    const adGroups = rAg.ok ? rAg.data : (warnings.push(rAg.warning), []);
+    const ads = rAds.ok ? rAds.data : (warnings.push(rAds.warning), []);
+    const keywords = rKw.ok ? rKw.data : (warnings.push(rKw.warning), []);
+
+    const allFailed = !rCamp.ok && !rAg.ok && !rAds.ok && !rKw.ok;
+    if (allFailed) {
+      const message = warnings.join(" · ");
+      const syncedAt = new Date().toISOString();
+      await admin.from("yandex_direct_snapshot").upsert(
+        {
+          user_id: userId,
+          payload: {
+            version: 1,
+            syncedAt,
+            yandexLogin: clientLogin,
+            syncWarnings: warnings,
+            campaigns,
+            adGroups,
+            ads,
+            keywords,
+            counts: { campaigns: 0, adGroups: 0, ads: 0, keywords: 0 },
+          } as unknown as Record<string, unknown>,
+          sync_status: "error",
+          error_message: message,
+          synced_at: syncedAt,
+        },
+        { onConflict: "user_id" }
+      );
+      return { ok: false, message };
+    }
 
     const syncedAt = new Date().toISOString();
     const payload: YandexSnapshotPayloadV1 = {
       version: 1,
       syncedAt,
       yandexLogin: clientLogin,
+      syncWarnings: warnings.length > 0 ? warnings : undefined,
       campaigns,
       adGroups,
       ads,
@@ -168,12 +209,15 @@ export async function syncYandexDirectStructure(
       },
     };
 
+    const rowStatus = warnings.length > 0 ? "partial" : "ok";
+    const rowError = warnings.length > 0 ? warnings.join(" · ") : null;
+
     const { error } = await admin.from("yandex_direct_snapshot").upsert(
       {
         user_id: userId,
         payload: payload as unknown as Record<string, unknown>,
-        sync_status: "ok",
-        error_message: null,
+        sync_status: rowStatus,
+        error_message: rowError,
         synced_at: syncedAt,
       },
       { onConflict: "user_id" }
