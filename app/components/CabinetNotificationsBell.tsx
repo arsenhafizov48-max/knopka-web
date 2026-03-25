@@ -26,11 +26,14 @@ function readDismissed(): string[] {
 export default function CabinetNotificationsBell() {
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  /** Пока false — не считаем уведомления (SSR/первый кадр без LS давали «фантомный» бейдж). */
+  const [ready, setReady] = useState(false);
   const [version, setVersion] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDismissed(readDismissed());
+    setReady(true);
   }, [version]);
 
   useEffect(() => {
@@ -56,12 +59,12 @@ export default function CabinetNotificationsBell() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  const notifications = useMemo(() => buildCabinetNotifications(), [version]);
+  const notifications = useMemo(() => (ready ? buildCabinetNotifications() : []), [ready, version]);
   const visible = useMemo(
     () => notifications.filter((n) => !dismissed.includes(n.id)),
     [notifications, dismissed]
   );
-  const count = visible.length;
+  const count = ready ? visible.length : 0;
 
   const dismiss = useCallback((id: string) => {
     const next = [...new Set([...readDismissed(), id])];
@@ -112,7 +115,9 @@ export default function CabinetNotificationsBell() {
             ) : null}
           </div>
           <div className="max-h-[min(60vh,420px)] overflow-y-auto px-2 py-2">
-            {visible.length === 0 ? (
+            {!ready ? (
+              <p className="px-2 py-6 text-center text-sm text-neutral-500">Подгружаем подсказки…</p>
+            ) : visible.length === 0 ? (
               <p className="px-2 py-6 text-center text-sm text-neutral-500">Пока всё заполнено — молодец.</p>
             ) : (
               <ul className="space-y-2">
