@@ -1,9 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, RefreshCw } from "lucide-react";
 
-import BrandIcon from "@/app/components/BrandIcon";
 import { resolveSameOriginApiUrl, withBasePathResolved } from "@/app/lib/publicBasePath";
 
 type Status = "connected" | "partial" | "disconnected" | "manual";
@@ -25,14 +25,25 @@ function StatusPill({ status, text }: { status: Status; text: string }) {
   );
 }
 
+type SnapshotInfo = {
+  syncedAt: string | null;
+  status: string | null;
+  errorMessage: string | null;
+  counts: { campaigns: number; adGroups: number; ads: number; keywords: number } | null;
+};
+
 type YandexState =
   | { kind: "loading" }
-  | { kind: "ok"; connected: boolean; expiresAt: string | null; serverError?: string }
+  | {
+      kind: "ok";
+      connected: boolean;
+      expiresAt: string | null;
+      serverError?: string;
+      snapshot: SnapshotInfo | null;
+    }
   | { kind: "error"; message: string };
 
 const ICON = {
-  slug: "yandex",
-  color: "#2563eb",
   tint: "bg-blue-50 text-blue-700 border-blue-100",
   fallback: "Я",
 } as const;
@@ -41,6 +52,7 @@ export function YandexDirectIntegrationRow() {
   const [st, setSt] = useState<YandexState>({ kind: "loading" });
   const [flash, setFlash] = useState<{ text: string; kind: "ok" | "err" } | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   const refresh = useCallback(() => {
     setSt({ kind: "loading" });
@@ -51,6 +63,12 @@ export function YandexDirectIntegrationRow() {
           authenticated?: boolean;
           expiresAt?: string | null;
           error?: string;
+          snapshot?: {
+            syncedAt: string | null;
+            status: string | null;
+            errorMessage: string | null;
+            counts: SnapshotInfo["counts"];
+          } | null;
         };
         if (!res.ok) {
           setSt({
@@ -58,18 +76,28 @@ export function YandexDirectIntegrationRow() {
             connected: false,
             expiresAt: null,
             serverError: j.error || `HTTP ${res.status}`,
+            snapshot: null,
           });
           return;
         }
         if (!j.authenticated) {
-          setSt({ kind: "ok", connected: false, expiresAt: null });
+          setSt({ kind: "ok", connected: false, expiresAt: null, snapshot: null });
           return;
         }
+        const snap = j.snapshot;
         setSt({
           kind: "ok",
           connected: !!j.connected,
           expiresAt: j.expiresAt ?? null,
           serverError: j.error,
+          snapshot: snap
+            ? {
+                syncedAt: snap.syncedAt ?? null,
+                status: snap.status ?? null,
+                errorMessage: snap.errorMessage ?? null,
+                counts: snap.counts ?? null,
+              }
+            : null,
         });
       })
       .catch((e: unknown) => {
@@ -112,6 +140,37 @@ export function YandexDirectIntegrationRow() {
     return () => window.clearTimeout(t);
   }, [flash]);
 
+  const onSync = async () => {
+    setSyncing(true);
+    try {
+      const res = await fetch(resolveSameOriginApiUrl("/api/yandex-direct/sync"), {
+        method: "POST",
+        credentials: "include",
+      });
+      const j = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        counts?: SnapshotInfo["counts"];
+      };
+      if (!res.ok) {
+        setFlash({ text: j.error || `HTTP ${res.status}`, kind: "err" });
+        return;
+      }
+      if (j.ok) {
+        const c = j.counts;
+        const line = c
+          ? `Снимок обновлён: кампаний ${c.campaigns}, групп ${c.adGroups}, объявлений ${c.ads}, фраз ${c.keywords}.`
+          : "Снимок обновлён.";
+        setFlash({ text: line, kind: "ok" });
+      } else {
+        setFlash({ text: j.error || "Синхронизация не удалась", kind: "err" });
+      }
+      refresh();
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const onDisconnect = async () => {
     setDisconnecting(true);
     try {
@@ -148,9 +207,25 @@ export function YandexDirectIntegrationRow() {
     meta = "OAuth: доступ к API Директа для вашего аккаунта.";
   } else {
     pill = { status: "connected", text: "Подключено" };
-    meta = st.expiresAt
-      ? `Токен до ${new Date(st.expiresAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}`
-      : "Аккаунт привязан. Импорт кампаний — в следующих версиях.";
+    const tokenLine = st.expiresAt
+      ? `Токен до ${new Date(st.expiresAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}.`
+      : "Аккаунт привязан.";
+    const snap = st.snapshot;
+    let snapLine = " Снимок структуры: ещё не выгружали — нажмите «Синхронизировать».";
+    if (snap?.syncedAt) {
+      const t = new Date(snap.syncedAt).toLocaleString("ru-RU", {
+        dateStyle: "short",
+        timeStyle: "short",
+      });
+      if (snap.status === "error" && snap.errorMessage) {
+        snapLine = ` Последняя выгрузка ${t}: ошибка — ${snap.errorMessage}`;
+      } else if (snap.counts) {
+        snapLine = ` Выгрузка ${t}: кампаний ${snap.counts.campaigns}, групп ${snap.counts.adGroups}, объявлений ${snap.counts.ads}, фраз ${snap.counts.keywords}.`;
+      } else {
+        snapLine = ` Выгрузка ${t}.`;
+      }
+    }
+    meta = tokenLine + snapLine;
   }
 
   return (
@@ -171,14 +246,10 @@ export function YandexDirectIntegrationRow() {
       <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <div
-            className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border ${ICON.tint}`}
+            className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border text-sm font-semibold ${ICON.tint}`}
+            title="Яндекс"
           >
-            <BrandIcon
-              slug={ICON.slug}
-              className="h-5 w-5"
-              color={ICON.color}
-              fallbackText={ICON.fallback}
-            />
+            {ICON.fallback}
           </div>
 
           <div className="min-w-0">
@@ -203,14 +274,31 @@ export function YandexDirectIntegrationRow() {
           ) : null}
 
           {st.kind === "ok" && st.connected ? (
-            <button
-              type="button"
-              disabled={disconnecting}
-              onClick={() => void onDisconnect()}
-              className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium hover:bg-neutral-50 disabled:opacity-60"
-            >
-              {disconnecting ? "Отключаем…" : "Отключить"}
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={syncing}
+                onClick={() => void onSync()}
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-60 sm:justify-end"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Синхронизация…" : "Синхронизировать"}
+              </button>
+              <Link
+                href="/app/yandex-direct-data"
+                className="text-center text-xs font-medium text-blue-600 hover:text-blue-700 sm:text-right"
+              >
+                Открыть выгруженные данные →
+              </Link>
+              <button
+                type="button"
+                disabled={disconnecting}
+                onClick={() => void onDisconnect()}
+                className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium hover:bg-neutral-50 disabled:opacity-60"
+              >
+                {disconnecting ? "Отключаем…" : "Отключить"}
+              </button>
+            </>
           ) : null}
         </div>
       </div>

@@ -26,5 +26,7 @@ export async function POST() {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  await admin.from("yandex_direct_snapshot").delete().eq("user_id", user.id);
+
   return NextResponse.json({ ok: true });
 }

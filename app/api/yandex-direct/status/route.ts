@@ -36,10 +36,31 @@ export async function GET() {
     );
   }
 
+  const snapRes = await admin
+    .from("yandex_direct_snapshot")
+    .select("synced_at, sync_status, error_message, payload")
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  const snap = snapRes.error ? null : snapRes.data;
+  const payload = snap?.payload as { counts?: unknown; version?: number } | null;
+  const snapshotCounts =
+    payload && typeof payload === "object" && payload.version === 1 && payload.counts
+      ? payload.counts
+      : null;
+
   return NextResponse.json({
     connected: !!data,
     authenticated: true,
     expiresAt: data?.expires_at ?? null,
     updatedAt: data?.updated_at ?? null,
+    snapshot: snap
+      ? {
+          syncedAt: snap.synced_at,
+          status: snap.sync_status,
+          errorMessage: snap.error_message,
+          counts: snapshotCounts,
+        }
+      : null,
   });
 }

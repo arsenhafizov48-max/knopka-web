@@ -25,3 +25,10 @@
 
 1. SQL Editor → выполни **`migrations/003_yandex_direct_oauth.sql`**.
 2. На Vercel задай **`SUPABASE_SERVICE_ROLE_KEY`** и переменные **`YANDEX_DIRECT_OAUTH_CLIENT_*`** (см. `.env.example`).
+
+## Снимок структуры Директа (`yandex_direct_snapshot`)
+
+Кампании, группы, объявления и ключевые фразы для ИИ / отчётов:
+
+1. SQL Editor → выполни **`migrations/004_yandex_direct_snapshot.sql`**.
+2. На Vercel задай **`CRON_SECRET`** (для ежедневного cron из `vercel.json`) и задеплой заново.
