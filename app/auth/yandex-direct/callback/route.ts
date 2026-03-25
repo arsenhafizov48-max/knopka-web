@@ -9,9 +9,9 @@ import {
   YANDEX_DIRECT_OAUTH_STATE_COOKIE,
 } from "@/app/lib/yandexDirectOAuth";
 
-function channelsRedirect(origin: string, query: Record<string, string>) {
+function systemsRedirect(origin: string, query: Record<string, string>) {
   const q = new URLSearchParams(query).toString();
-  return NextResponse.redirect(`${origin}${withBasePath(`/app/channels?${q}`)}`);
+  return NextResponse.redirect(`${origin}${withBasePath(`/app/systems?${q}`)}`);
 }
 
 export async function GET(request: Request) {
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
 
   const yandexError = url.searchParams.get("error");
   if (yandexError) {
-    return channelsRedirect(origin, {
+    return systemsRedirect(origin, {
       yd_error: url.searchParams.get("error_description") || yandexError,
     });
   }
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   const code = url.searchParams.get("code");
   const state = url.searchParams.get("state");
   if (!code || !state) {
-    return channelsRedirect(origin, { yd_error: "missing_code_or_state" });
+    return systemsRedirect(origin, { yd_error: "missing_code_or_state" });
   }
 
   const cookieStore = await cookies();
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
   });
 
   if (!expected || expected !== state) {
-    return channelsRedirect(origin, { yd_error: "invalid_state" });
+    return systemsRedirect(origin, { yd_error: "invalid_state" });
   }
 
   const supabase = await createSupabaseAuthRouteClient();
@@ -48,20 +48,20 @@ export async function GET(request: Request) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return channelsRedirect(origin, { yd_error: "not_logged_in" });
+    return systemsRedirect(origin, { yd_error: "not_logged_in" });
   }
 
   const clientId = process.env.YANDEX_DIRECT_OAUTH_CLIENT_ID?.trim();
   const clientSecret = process.env.YANDEX_DIRECT_OAUTH_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret) {
-    return channelsRedirect(origin, { yd_error: "server_oauth_not_configured" });
+    return systemsRedirect(origin, { yd_error: "server_oauth_not_configured" });
   }
 
   let admin;
   try {
     admin = getSupabaseServiceRoleClient();
   } catch {
-    return channelsRedirect(origin, { yd_error: "server_db_not_configured" });
+    return systemsRedirect(origin, { yd_error: "server_db_not_configured" });
   }
 
   const redirectUri = getYandexDirectRedirectUri(request.url);
@@ -84,7 +84,7 @@ export async function GET(request: Request) {
   try {
     tokenJson = JSON.parse(rawText) as Record<string, unknown>;
   } catch {
-    return channelsRedirect(origin, { yd_error: "token_not_json" });
+    return systemsRedirect(origin, { yd_error: "token_not_json" });
   }
 
   if (!tokenRes.ok) {
@@ -94,12 +94,12 @@ export async function GET(request: Request) {
         : typeof tokenJson.error === "string"
           ? tokenJson.error
           : "token_exchange_failed";
-    return channelsRedirect(origin, { yd_error: msg });
+    return systemsRedirect(origin, { yd_error: msg });
   }
 
   const accessToken = typeof tokenJson.access_token === "string" ? tokenJson.access_token : "";
   if (!accessToken) {
-    return channelsRedirect(origin, { yd_error: "no_access_token" });
+    return systemsRedirect(origin, { yd_error: "no_access_token" });
   }
 
   const expiresIn =
@@ -123,8 +123,8 @@ export async function GET(request: Request) {
   );
 
   if (upsertError) {
-    return channelsRedirect(origin, { yd_error: upsertError.message });
+    return systemsRedirect(origin, { yd_error: upsertError.message });
   }
 
-  return channelsRedirect(origin, { yd: "connected" });
+  return systemsRedirect(origin, { yd: "connected" });
 }

@@ -2,6 +2,9 @@
 import Link from "next/link";
 import BrandIcon from "@/app/components/BrandIcon";
 
+import { IntegrationsRefreshButton } from "@/app/app/systems/IntegrationsRefreshButton";
+import { YandexDirectIntegrationRow } from "@/app/app/systems/YandexDirectIntegrationRow";
+
 type Status = "connected" | "partial" | "disconnected" | "manual";
 
 function StatusPill({ status, text }: { status: Status; text: string }) {
@@ -100,19 +103,6 @@ export default function Page() {
         color: "#111827",
         tint: "bg-neutral-50 text-neutral-700 border-neutral-100",
         fallback: "G",
-      },
-    },
-    {
-      name: "Яндекс Директ",
-      sub: "Реклама",
-      status: "connected",
-      statusText: "Подключено",
-      meta: "Импорт расходов: раз в день",
-      icon: {
-        slug: "yandex",
-        color: "#2563eb",
-        tint: "bg-blue-50 text-blue-700 border-blue-100",
-        fallback: "Я",
       },
     },
     {
@@ -241,14 +231,36 @@ export default function Page() {
                 </p>
               </div>
 
-              <button className="rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium hover:bg-neutral-50">
-                Обновить статусы интеграций
-              </button>
+              <IntegrationsRefreshButton />
             </div>
 
             <div className="mt-4 space-y-2">
-              {integrations.map((x) => (
-                <div key={x.name} className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-3">
+              {integrations.slice(0, 4).map((x) => (
+                <div
+                  key={x.name}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <IconBox icon={x.icon} />
+
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="font-medium">{x.name}</div>
+                        <div className="text-xs text-neutral-500">{x.sub}</div>
+                      </div>
+                      <div className="mt-1 text-xs text-neutral-500">{x.meta}</div>
+                    </div>
+                  </div>
+
+                  <StatusPill status={x.status} text={x.statusText} />
+                </div>
+              ))}
+              <YandexDirectIntegrationRow />
+              {integrations.slice(4).map((x) => (
+                <div
+                  key={x.name}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-3"
+                >
                   <div className="flex items-center gap-3">
                     <IconBox icon={x.icon} />
 
