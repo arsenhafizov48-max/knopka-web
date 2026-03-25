@@ -48,10 +48,32 @@ function inferClientBasePathFromPathname(): string {
   return `/${head}`;
 }
 
-/** Для fetch() с клиента — путь к API/страницам с учётом basePath даже при расхождении env в бандле. */
+type WindowWithBase = Window & { __KNOPKA_BASE_PATH__?: string | null };
+
+/**
+ * Непустая строка — префикс из билда (как next.config).
+ * null — в билде префикса нет, смотрим URL.
+ * undefined — скрипт не выполнился.
+ */
+function getBasePathFromDocument(): string | null | undefined {
+  if (typeof window === "undefined") return undefined;
+  if (!("__KNOPKA_BASE_PATH__" in (window as WindowWithBase))) return undefined;
+  const v = (window as WindowWithBase).__KNOPKA_BASE_PATH__;
+  if (v === null) return null;
+  if (typeof v === "string" && v.length > 0) return v;
+  return undefined;
+}
+
+/** Для fetch() с клиента — путь к API/страницам с учётом basePath. */
 export function withBasePathResolved(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
   if (typeof window === "undefined") return withBasePath(path);
+
+  const fromDoc = getBasePathFromDocument();
+  if (typeof fromDoc === "string") {
+    return `${fromDoc}${p}`;
+  }
+
   const base = inferClientBasePathFromPathname();
   return `${base}${p}`;
 }
