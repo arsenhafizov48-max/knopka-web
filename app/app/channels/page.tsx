@@ -1,16 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   CircleDollarSign,
   Link as LinkIcon,
+  Plug,
   Search,
   Users,
 } from "lucide-react";
 
 import { loadProjectFact } from "@/app/app/lib/projectFact";
+import { resolveSameOriginApiUrl, withBasePathResolved } from "@/app/lib/publicBasePath";
 
 type Fact = ReturnType<typeof loadProjectFact>;
 
@@ -88,9 +90,18 @@ function EmptyBlock({
   );
 }
 
+type YandexDirectStatus =
+  | { kind: "loading" }
+  | { kind: "ok"; connected: boolean; expiresAt: string | null; serverError?: string }
+  | { kind: "error"; message: string };
+
 export default function ChannelsPage() {
   const [fact, setFact] = useState<Fact | null>(null);
   const [q, setQ] = useState("");
+  const [yandexDirect, setYandexDirect] = useState<YandexDirectStatus>({ kind: "loading" });
+  const [ydFlash, setYdFlash] = useState<string | null>(null);
+  const [ydFlashKind, setYdFlashKind] = useState<"ok" | "err">("ok");
+  const [disconnecting, setDisconnecting] = useState(false);
 
   useEffect(() => {
     const read = () => setFact(loadProjectFact());
@@ -102,6 +113,96 @@ export default function ChannelsPage() {
 
     return () => window.removeEventListener("knopka:projectFactUpdated", onUpdated);
   }, []);
+
+  const refreshYandexDirect = useCallback(() => {
+    setYandexDirect({ kind: "loading" });
+    fetch(resolveSameOriginApiUrl("/api/yandex-direct/status"), { credentials: "include" })
+      .then(async (res) => {
+        const j = (await res.json()) as {
+          connected?: boolean;
+          authenticated?: boolean;
+          expiresAt?: string | null;
+          error?: string;
+        };
+        if (!res.ok) {
+          setYandexDirect({
+            kind: "ok",
+            connected: false,
+            expiresAt: null,
+            serverError: j.error || `HTTP ${res.status}`,
+          });
+          return;
+        }
+        if (!j.authenticated) {
+          setYandexDirect({ kind: "ok", connected: false, expiresAt: null });
+          return;
+        }
+        setYandexDirect({
+          kind: "ok",
+          connected: !!j.connected,
+          expiresAt: j.expiresAt ?? null,
+          serverError: j.error,
+        });
+      })
+      .catch((e: unknown) => {
+        setYandexDirect({
+          kind: "error",
+          message: e instanceof Error ? e.message : "Не удалось загрузить статус",
+        });
+      });
+  }, []);
+
+  useEffect(() => {
+    refreshYandexDirect();
+  }, [refreshYandexDirect]);
+
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const yd = sp.get("yd");
+    const ydError = sp.get("yd_error");
+    if (yd === "connected") {
+      setYdFlash("Яндекс Директ подключён.");
+      setYdFlashKind("ok");
+      refreshYandexDirect();
+    } else if (ydError) {
+      setYdFlash(ydError);
+      setYdFlashKind("err");
+    }
+    if (yd || ydError) {
+      sp.delete("yd");
+      sp.delete("yd_error");
+      const qs = sp.toString();
+      const path = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+      window.history.replaceState(null, "", path);
+    }
+  }, [refreshYandexDirect]);
+
+  useEffect(() => {
+    if (!ydFlash) return;
+    const t = window.setTimeout(() => setYdFlash(null), 12000);
+    return () => window.clearTimeout(t);
+  }, [ydFlash]);
+
+  const onDisconnectYandexDirect = async () => {
+    setDisconnecting(true);
+    try {
+      const res = await fetch(resolveSameOriginApiUrl("/api/yandex-direct/disconnect"), {
+        method: "POST",
+        credentials: "include",
+      });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        setYdFlash(j.error || "Не удалось отключить");
+        setYdFlashKind("err");
+        return;
+      }
+      setYdFlash("Яндекс Директ отключён.");
+      setYdFlashKind("ok");
+      refreshYandexDirect();
+    } finally {
+      setDisconnecting(false);
+    }
+  };
 
   const channelBudgets = useMemo(() => {
     const rows = (fact as any)?.channelBudgets ?? [];
@@ -187,6 +288,19 @@ export default function ChannelsPage() {
   return (
     <div className="mx-auto w-full max-w-none px-0">
       <div className="mx-auto w-full max-w-[1540px] px-6 py-6">
+        {ydFlash ? (
+          <div
+            className={
+              ydFlashKind === "ok"
+                ? "mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900"
+                : "mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900"
+            }
+            role="status"
+          >
+            {ydFlash}
+          </div>
+        ) : null}
+
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -360,6 +474,58 @@ export default function ChannelsPage() {
                   Изменить в фактуре <ArrowUpRight className="h-4 w-4" />
                 </Link>
               </div>
+            </section>
+
+            {/* Яндекс Директ (OAuth) */}
+            <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+              <div className="flex items-center gap-2">
+                <Plug className="h-4 w-4 text-neutral-600" />
+                <div className="text-sm font-semibold">Яндекс Директ</div>
+              </div>
+              <div className="mt-2 text-sm text-neutral-600">
+                Подключите аккаунт, чтобы позже подтягивать кампании и метрики в анализ каналов.
+              </div>
+
+              {yandexDirect.kind === "loading" ? (
+                <div className="mt-3 text-xs text-neutral-500">Проверяем подключение…</div>
+              ) : yandexDirect.kind === "error" ? (
+                <div className="mt-3 text-sm text-red-700">{yandexDirect.message}</div>
+              ) : yandexDirect.serverError === "service_role_missing" ? (
+                <div className="mt-3 text-sm text-amber-800">
+                  На сервере не задан <code className="text-xs">SUPABASE_SERVICE_ROLE_KEY</code> —
+                  статус Директа недоступен.
+                </div>
+              ) : !yandexDirect.connected ? (
+                <div className="mt-4">
+                  <a
+                    href={withBasePathResolved("/api/yandex-direct/authorize")}
+                    className="inline-flex items-center gap-2 rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+                  >
+                    Подключить <ArrowUpRight className="h-4 w-4" />
+                  </a>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <div className="text-sm font-medium text-green-800">Подключено</div>
+                  {yandexDirect.expiresAt ? (
+                    <div className="text-xs text-neutral-500">
+                      Токен действует до{" "}
+                      {new Date(yandexDirect.expiresAt).toLocaleString("ru-RU", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={disconnecting}
+                    onClick={() => void onDisconnectYandexDirect()}
+                    className="inline-flex items-center rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm font-medium hover:bg-neutral-50 disabled:opacity-60"
+                  >
+                    {disconnecting ? "Отключаем…" : "Отключить"}
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* Links */}
