@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { withBasePathResolved } from "@/app/lib/publicBasePath";
+import { resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
 
 type UserInfoPayload = {
   userInfo?: {
@@ -24,8 +24,7 @@ export default function WordstatHealthCard() {
     setErr(null);
     setResult(null);
     try {
-      const url = `${window.location.origin}${withBasePathResolved("/api/wordstat")}`;
-      const res = await fetch(url, {
+      const res = await fetch(resolveSameOriginApiUrl("/api/wordstat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ op: "userInfo" }),

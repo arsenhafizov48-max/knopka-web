@@ -8,7 +8,7 @@ import remarkGfm from "remark-gfm";
 import { Maximize2, MessageCircle, Minimize2, Paperclip, Send, X } from "lucide-react";
 
 import { getSupabaseBrowserClient } from "@/app/lib/supabaseClient";
-import { withBasePath, withBasePathResolved } from "@/app/lib/publicBasePath";
+import { withBasePath, resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
 import { loadStrategyThread, saveStrategyThread } from "@/app/app/lib/gigachat/strategyThreadDb";
 import type { ProjectFact } from "@/app/app/lib/projectFact";
 import { formatProjectFactForAi } from "@/app/app/lib/gigachat/formatProjectFactForAi";
@@ -227,8 +227,7 @@ export function StrategyGigaChat({
     setTurns(nextTurns);
     setLoading(true);
     try {
-      const url = `${window.location.origin}${withBasePathResolved("/api/gigachat/chat")}`;
-      const res = await fetch(url, {
+      const res = await fetch(resolveSameOriginApiUrl("/api/gigachat/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",

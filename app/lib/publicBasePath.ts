@@ -77,3 +77,42 @@ export function withBasePathResolved(path: string): string {
   const base = inferClientBasePathFromPathname();
   return `${base}${p}`;
 }
+
+/**
+ * Абсолютный URL для fetch к Route Handlers /api/* на том же origin.
+ * Считается через относительный путь от текущей страницы — не зависит от NEXT_PUBLIC_BASE_PATH
+ * в клиентском чанке и корректно работает с кириллическим basePath (/кнопка/...).
+ */
+export function resolveSameOriginApiUrl(apiPath: string): string {
+  const p = apiPath.startsWith("/") ? apiPath : `/${apiPath}`;
+  if (!p.startsWith("/api")) {
+    return typeof window !== "undefined"
+      ? `${window.location.origin}${withBasePathResolved(p)}`
+      : `${getPublicBasePath()}${p}`;
+  }
+
+  if (typeof window === "undefined") {
+    return `${getPublicBasePath()}${p}`;
+  }
+
+  const origin = window.location.origin;
+  const pathname = window.location.pathname.replace(/\/$/, "") || "/";
+  const parts = pathname.split("/").filter(Boolean);
+
+  if (parts.length === 0) {
+    return `${origin}${getPublicBasePath()}${p}`;
+  }
+
+  const first = parts[0]!;
+  const ups = PATH_ROOT_FIRST_SEGMENTS.has(first) ? parts.length : parts.length - 1;
+  const tail = p.replace(/^\/api\/?/, "");
+  const upPart = ups > 0 ? "../".repeat(ups) : "";
+  const rel = tail ? `${upPart}api/${tail}` : `${upPart}api`;
+
+  const baseDirUrl = `${origin}${pathname}/`;
+  try {
+    return new URL(rel, baseDirUrl).href;
+  } catch {
+    return `${origin}${withBasePathResolved(p)}`;
+  }
+}

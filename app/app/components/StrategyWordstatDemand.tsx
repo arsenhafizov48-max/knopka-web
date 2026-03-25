@@ -8,7 +8,7 @@ import { buildStrategyDocument } from "@/app/app/lib/strategy/buildFromFact";
 import { applyWordstatMarketSection } from "@/app/app/lib/strategy/applyWordstatMarket";
 import { saveStrategy } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
-import { withBasePathResolved } from "@/app/lib/publicBasePath";
+import { resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
 
 type Props = {
   fact: ProjectFact;
@@ -27,8 +27,7 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
     setErr(null);
     setOk(null);
     try {
-      const url = `${window.location.origin}${withBasePathResolved("/api/strategy/wordstat-demand")}`;
-      const res = await fetch(url, {
+      const res = await fetch(resolveSameOriginApiUrl("/api/strategy/wordstat-demand"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ fact }),
