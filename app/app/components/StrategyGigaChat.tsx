@@ -294,7 +294,11 @@ export function StrategyGigaChat({
         }
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Не удалось отправить";
+      let msg = e instanceof Error ? e.message : "Не удалось отправить";
+      if (msg === "Failed to fetch" || /networkerror|load failed/i.test(msg)) {
+        msg =
+          "Нет ответа от сервера (сеть, VPN, блокировка или неверный адрес API). Проверьте подключение; на проде — переменную NEXT_PUBLIC_BASE_PATH, если сайт открывается с префиксом в URL.";
+      }
       setError(msg);
       setTurns((prev) =>
         prev.length > 0 && prev[prev.length - 1]?.role === "user" ? prev.slice(0, -1) : prev
