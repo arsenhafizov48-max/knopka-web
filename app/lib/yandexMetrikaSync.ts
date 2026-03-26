@@ -37,18 +37,17 @@ function rangeLastDays(days: number): { date1: string; date2: string } {
   return { date1: isoDate(start), date2: isoDate(end) };
 }
 
-async function metricaPostJson(
+/** Отчёты `stat/v1/data` в API Метрики — только GET с query-параметрами (POST даёт 405). */
+async function metricaStatDataGet(
   token: string,
-  path: string,
-  body: Record<string, unknown>
+  query: Record<string, string>
 ): Promise<{ ok: boolean; status: number; json: unknown }> {
-  const res = await fetch(`https://api-metrika.yandex.net${path}`, {
-    method: "POST",
+  const sp = new URLSearchParams(query);
+  const res = await fetch(`https://api-metrika.yandex.net/stat/v1/data?${sp.toString()}`, {
+    method: "GET",
     headers: {
       Authorization: `OAuth ${token}`,
-      "Content-Type": "application/json",
     },
-    body: JSON.stringify(body),
   });
   const text = await res.text();
   let json: unknown;
@@ -93,18 +92,14 @@ async function fetchTotals(
   date1: string,
   date2: string
 ): Promise<MetrikaSnapshotPayloadV1["totals"] | null> {
-  const r = await metricaPostJson(token, "/stat/v1/data", {
-    ids: [counterId],
-    metrics: [
-      "ym:s:visits",
-      "ym:s:bounceRate",
-      "ym:s:avgVisitDurationSeconds",
-      "ym:s:pageviews",
-    ],
+  const r = await metricaStatDataGet(token, {
+    ids: String(counterId),
+    metrics:
+      "ym:s:visits,ym:s:bounceRate,ym:s:avgVisitDurationSeconds,ym:s:pageviews",
     date1,
     date2,
     accuracy: "0.95",
-    limit: 1,
+    limit: "1",
   });
   if (!r.ok) {
     throw new Error(apiErrorMessage(r.json));
@@ -127,14 +122,14 @@ async function fetchByTrafficSource(
   date1: string,
   date2: string
 ): Promise<MetrikaSnapshotPayloadV1["byTrafficSource"]> {
-  const r = await metricaPostJson(token, "/stat/v1/data", {
-    ids: [counterId],
-    dimensions: ["ym:s:lastTrafficSource"],
-    metrics: ["ym:s:visits", "ym:s:bounceRate", "ym:s:avgVisitDurationSeconds"],
+  const r = await metricaStatDataGet(token, {
+    ids: String(counterId),
+    dimensions: "ym:s:lastTrafficSource",
+    metrics: "ym:s:visits,ym:s:bounceRate,ym:s:avgVisitDurationSeconds",
     date1,
     date2,
     accuracy: "0.95",
-    limit: 100,
+    limit: "100",
   });
   if (!r.ok) {
     return [];
