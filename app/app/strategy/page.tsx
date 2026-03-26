@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, FileText, RefreshCw, Sparkles } from "lucide-react";
+import { AlertCircle, FileDown, FileText, RefreshCw, Sparkles } from "lucide-react";
 
 import { loadProjectFact, type ProjectFact } from "@/app/app/lib/projectFact";
 import { buildStrategyDocument } from "@/app/app/lib/strategy/buildFromFact";
@@ -13,13 +13,19 @@ import {
   saveStrategy,
 } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
+import { StrategyCompetitorAnalysis } from "@/app/app/components/StrategyCompetitorAnalysis";
 import { StrategyGigaChat } from "@/app/app/components/StrategyGigaChat";
 import { StrategyWordstatDemand } from "@/app/app/components/StrategyWordstatDemand";
+import { downloadStrategyDocumentPdf } from "@/app/app/lib/strategy/strategyPdfExport";
+
+type StrategyAreaTab = "demand" | "competitors";
 
 export default function StrategyPage() {
   const [fact, setFact] = useState<ProjectFact | null>(null);
   const [doc, setDoc] = useState<StrategyDocument | null>(null);
   const [busy, setBusy] = useState(false);
+  const [areaTab, setAreaTab] = useState<StrategyAreaTab>("demand");
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   const refresh = useCallback(() => {
     setFact(loadProjectFact());
@@ -132,7 +138,44 @@ export default function StrategyPage() {
         </div>
       </div>
 
-      <StrategyWordstatDemand fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
+      <div className="space-y-4">
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-1">
+          <button
+            type="button"
+            onClick={() => setAreaTab("demand")}
+            className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+              areaTab === "demand"
+                ? "bg-white text-neutral-900 shadow-sm"
+                : "text-neutral-600 hover:text-neutral-900"
+            }`}
+          >
+            Спрос
+          </button>
+          <button
+            type="button"
+            onClick={() => setAreaTab("competitors")}
+            className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+              areaTab === "competitors"
+                ? "bg-white text-neutral-900 shadow-sm"
+                : "text-neutral-600 hover:text-neutral-900"
+            }`}
+          >
+            Конкуренты
+          </button>
+          <Link
+            href="/app/strategy/history"
+            className="ml-auto self-center pr-2 text-xs font-medium text-neutral-500 underline decoration-neutral-300 underline-offset-2 hover:text-neutral-800"
+          >
+            История анализов
+          </Link>
+        </div>
+
+        {areaTab === "demand" ? (
+          <StrategyWordstatDemand fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
+        ) : (
+          <StrategyCompetitorAnalysis fact={fact} gapsOk={gaps.ok} />
+        )}
+      </div>
 
       <StrategyGigaChat doc={doc} fact={fact} />
 
@@ -178,7 +221,28 @@ export default function StrategyPage() {
                 minute: "2-digit",
               })}
             </span>
-            <span>Фактура на момент сборки: {doc.factSnapshotUpdatedAt.slice(0, 10)}</span>
+            <div className="flex flex-wrap items-center gap-3">
+              <span>Фактура на момент сборки: {doc.factSnapshotUpdatedAt.slice(0, 10)}</span>
+              <button
+                type="button"
+                disabled={pdfBusy}
+                onClick={async () => {
+                  setPdfBusy(true);
+                  try {
+                    await downloadStrategyDocumentPdf(doc, "strategiya-knopka.pdf");
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : "Ошибка PDF";
+                    window.alert(msg);
+                  } finally {
+                    setPdfBusy(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-800 hover:bg-neutral-50 disabled:opacity-50"
+              >
+                <FileDown className="h-3.5 w-3.5" />
+                {pdfBusy ? "PDF…" : "Скачать PDF"}
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3">

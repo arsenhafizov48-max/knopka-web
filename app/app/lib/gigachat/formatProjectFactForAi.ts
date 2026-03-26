@@ -1,5 +1,3 @@
-"use client";
-
 import type { ProjectFact } from "@/app/app/lib/projectFact";
 
 /** Текстовый снимок фактуры для системного промпта GigaChat (без выдумывания полей). */

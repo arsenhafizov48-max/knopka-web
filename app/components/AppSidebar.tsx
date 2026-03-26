@@ -17,6 +17,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Target,
+  History,
 } from "lucide-react";
 import SidebarSignOut from "@/app/components/SidebarSignOut";
 
@@ -44,6 +45,11 @@ export default function AppSidebar({
   const nav: NavItem[] = [
     { label: "Дашборд", href: "/app/dashboard", icon: <LayoutDashboard className="h-4 w-4" /> },
     { label: "Стратегия", href: "/app/strategy", icon: <Target className="h-4 w-4" /> },
+    {
+      label: "История анализов",
+      href: "/app/strategy/history",
+      icon: <History className="h-4 w-4" />,
+    },
     { label: "Каналы", href: "/app/channels", icon: <Megaphone className="h-4 w-4" /> },
     { label: "Продукт и прайс", href: "/app/product", icon: <Package className="h-4 w-4" /> },
     { label: "Планы и инициативы", href: "/app/plans", icon: <ClipboardList className="h-4 w-4" /> },
@@ -78,9 +84,12 @@ export default function AppSidebar({
       {/* NAV */}
       <nav className="space-y-1">
         {nav.map((item) => {
-          const isActive =
+          let isActive =
             pathname === item.href ||
             (item.href !== "/app/dashboard" && pathname.startsWith(item.href));
+          if (item.href === "/app/strategy" && pathname.startsWith("/app/strategy/history")) {
+            isActive = false;
+          }
 
           return (
             <Link
