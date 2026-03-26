@@ -27,6 +27,14 @@
 2. После обновления приложения выполни **`migrations/005_yandex_direct_oauth_profile.sql`** — колонки почты и логина Яндекса для подписи в блоке интеграции.
 3. На Vercel задай **`SUPABASE_SERVICE_ROLE_KEY`** и переменные **`YANDEX_DIRECT_OAUTH_CLIENT_*`** (см. `.env.example`).
 
+## Яндекс Метрика OAuth + счётчики (`yandex_metrika_oauth`, `yandex_metrika_counters`)
+
+Отчёты по визитам, источникам и отказам (Reporting API):
+
+1. SQL Editor → выполни **`migrations/006_yandex_metrika.sql`**.
+2. В [oauth.yandex.ru](https://oauth.yandex.ru/) создай приложение с **`metrika:read`**, Redirect URI = `https://ваш-домен/.../auth/yandex-metrika/callback`.
+3. На Vercel задай **`YANDEX_METRIKA_OAUTH_CLIENT_ID`**, **`YANDEX_METRIKA_OAUTH_CLIENT_SECRET`** (и при необходимости **`YANDEX_METRIKA_OAUTH_REDIRECT_URI`**). Тот же **`CRON_SECRET`**, что для Директа — для ночного `/api/yandex-metrika/sync`.
+
 ## Снимок структуры Директа (`yandex_direct_snapshot`)
 
 Кампании, группы, объявления и ключевые фразы для ИИ / отчётов:

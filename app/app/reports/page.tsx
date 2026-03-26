@@ -5,6 +5,7 @@ import ReportsList from "../components/reports/ReportsList";
 import ReportsHeaderControls from "../components/reports/ReportsHeaderControls";
 import ReportsLiveKpis from "./ReportsLiveKpis";
 import ReportsPeriodOverview from "./ReportsPeriodOverview";
+import ReportsIntegrationsSnapshot from "./ReportsIntegrationsSnapshot";
 
 import { AlertTriangle } from "lucide-react";
 
@@ -66,6 +67,8 @@ export default function Page() {
         </div>
 
         <ReportsLiveKpis />
+
+        <ReportsIntegrationsSnapshot />
 
         <ReportsPeriodOverview />
 

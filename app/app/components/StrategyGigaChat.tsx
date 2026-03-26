@@ -150,8 +150,30 @@ export function StrategyGigaChat({
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen]);
 
+  const [integrationsBlock, setIntegrationsBlock] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    fetch(resolveSameOriginApiUrl("/api/integrations/summary"), { credentials: "include" })
+      .then(async (res) => {
+        const j = (await res.json()) as { blockForAi?: string };
+        if (!alive) return;
+        setIntegrationsBlock(typeof j.blockForAi === "string" ? j.blockForAi : "");
+      })
+      .catch(() => {
+        if (alive) setIntegrationsBlock("");
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const strategyContext = useMemo(() => buildStrategyContext(doc), [doc]);
-  const cabinetContext = useMemo(() => formatProjectFactForAi(fact), [fact]);
+  const cabinetContext = useMemo(() => {
+    const base = formatProjectFactForAi(fact);
+    if (!integrationsBlock.trim()) return base;
+    return `${base}\n\n--- Подключённые интеграции (сервер) ---\n${integrationsBlock.trim()}`;
+  }, [fact, integrationsBlock]);
 
   const onPickFiles = useCallback(async (list: FileList | null) => {
     if (!list?.length) return;

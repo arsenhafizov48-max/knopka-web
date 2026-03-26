@@ -3,6 +3,10 @@
     {
       "path": "/api/yandex-direct/sync",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/yandex-metrika/sync",
+      "schedule": "15 2 * * *"
     }
   ]
 }

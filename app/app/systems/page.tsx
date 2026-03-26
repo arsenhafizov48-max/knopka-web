@@ -4,6 +4,7 @@ import BrandIcon from "@/app/components/BrandIcon";
 
 import { IntegrationsRefreshButton } from "@/app/app/systems/IntegrationsRefreshButton";
 import { YandexDirectIntegrationRow } from "@/app/app/systems/YandexDirectIntegrationRow";
+import { YandexMetrikaIntegrationRow } from "@/app/app/systems/YandexMetrikaIntegrationRow";
 
 type Status = "connected" | "partial" | "disconnected" | "manual";
 
@@ -53,19 +54,6 @@ type Item = {
 export default function Page() {
   // Примечание: если какого-то бренда нет в simple-icons — покажется fallbackText (буква/символ)
   const integrations: Item[] = [
-    {
-      name: "Яндекс Метрика",
-      sub: "Аналитика сайта",
-      status: "connected",
-      statusText: "Подключено",
-      meta: "Синхронизация: 2 часа назад",
-      icon: {
-        slug: "yandex",
-        color: "#2563eb",
-        tint: "bg-blue-50 text-blue-700 border-blue-100",
-        fallback: "Я",
-      },
-    },
     {
       name: "Google Analytics / GA4",
       sub: "Аналитика сайта",
@@ -235,7 +223,8 @@ export default function Page() {
             </div>
 
             <div className="mt-4 space-y-2">
-              {integrations.slice(0, 4).map((x) => (
+              <YandexMetrikaIntegrationRow />
+              {integrations.slice(0, 3).map((x) => (
                 <div
                   key={x.name}
                   className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-3"
@@ -256,7 +245,7 @@ export default function Page() {
                 </div>
               ))}
               <YandexDirectIntegrationRow />
-              {integrations.slice(4).map((x) => (
+              {integrations.slice(3).map((x) => (
                 <div
                   key={x.name}
                   className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-3"

@@ -12,6 +12,7 @@ import {
   type IntegrationGroup,
   type IntegrationStatus,
 } from "@/app/app/lib/projectFact";
+import { withBasePathResolved } from "@/app/lib/publicBasePath";
 
 type TabKey = "connect" | "about" | "howto";
 
@@ -47,10 +48,9 @@ const META: Record<string, SystemMeta> = {
     description:
       "Яндекс.Метрика собирает данные о посещениях сайта, источниках трафика и поведении пользователей. «Кнопка» будет использовать Метрику для сводки по трафику и конверсиям.",
     instruction: [
-      "Откройте Яндекс.Метрику и выберите нужный счётчик.",
-      "Перейдите в настройки счётчика и найдите его номер.",
-      "Вставьте номер счётчика в поле «Номер счётчика».",
-      "Нажмите «Подключить».",
+      "Либо нажмите «Подключить Метрику (OAuth)» ниже — откроется Яндекс, затем в «Системы и данные» добавьте номер счётчика.",
+      "Либо вручную: откройте Метрику, найдите номер счётчика в настройках и введите его в поле.",
+      "Нажмите «Подключить» для сохранения в фактуре или завершите OAuth в кабинете.",
     ],
   },
 
@@ -154,9 +154,8 @@ const META: Record<string, SystemMeta> = {
     description:
       "Яндекс.Директ — источник данных о расходах, кликах и кампаниях. «Кнопка» будет сопоставлять эти данные с заявками и выручкой.",
     instruction: [
-      "Укажите логин рекламного кабинета.",
-      "Нажмите «Подключить».",
-      "Дальше «Кнопка» покажет, как дать доступ по инструкции.",
+      "Нажмите «Подключить Директ (OAuth)» ниже — откроется авторизация Яндекса и сохранится доступ к API.",
+      "Или укажите логин кабинета вручную и нажмите «Подключить» для фактуры.",
     ],
   },
 
@@ -657,6 +656,40 @@ export default function Step3SystemsPage() {
                       )}
                     </div>
                   ))}
+
+                  {active.title === "Яндекс.Метрика" ? (
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/90 p-4">
+                      <div className="text-sm font-medium text-neutral-900">
+                        Подключение через OAuth
+                      </div>
+                      <p className="mt-1 text-xs text-neutral-600">
+                        После входа откройте «Системы и данные» и добавьте номер счётчика — тогда выгрузятся отчёты для ИИ.
+                      </p>
+                      <a
+                        href={withBasePathResolved("/api/yandex-metrika/authorize")}
+                        className="mt-3 inline-flex rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-800"
+                      >
+                        Подключить Метрику (OAuth)
+                      </a>
+                    </div>
+                  ) : null}
+
+                  {active.title === "Яндекс.Директ" ? (
+                    <div className="rounded-xl border border-blue-100 bg-blue-50/90 p-4">
+                      <div className="text-sm font-medium text-neutral-900">
+                        Подключение через OAuth
+                      </div>
+                      <p className="mt-1 text-xs text-neutral-600">
+                        Доступ к API Директа для выгрузки кампаний и расходов.
+                      </p>
+                      <a
+                        href={withBasePathResolved("/api/yandex-direct/authorize")}
+                        className="mt-3 inline-flex rounded-xl bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-800"
+                      >
+                        Подключить Директ (OAuth)
+                      </a>
+                    </div>
+                  ) : null}
 
                   <div className="mt-6 flex items-center gap-3">
                     <button
