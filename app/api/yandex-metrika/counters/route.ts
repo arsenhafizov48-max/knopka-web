@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createSupabaseAuthRouteClient } from "@/app/lib/supabaseAuthRoute";
+import { logIntegrationActivity } from "@/app/lib/integrationActivity";
 import { getSupabaseServiceRoleClient } from "@/app/lib/supabaseServiceRole";
 import { ensureYandexMetrikaAccessToken } from "@/app/lib/yandexMetrikaEnsureToken";
 import { syncYandexMetrikaCounter } from "@/app/lib/yandexMetrikaSync";
@@ -182,12 +183,27 @@ export async function POST(request: Request) {
     }
     const sync = await syncYandexMetrikaCounter(admin, user.id, rowId);
     if (!sync.ok) {
+      await logIntegrationActivity(
+        admin,
+        user.id,
+        "Яндекс Метрика",
+        `Счётчик ${counterId}: ошибка выгрузки — ${sync.message}`,
+        "bad"
+      );
       return NextResponse.json({
         ok: false,
         counterId: rowId,
         error: sync.message,
       });
     }
+
+    await logIntegrationActivity(
+      admin,
+      user.id,
+      "Яндекс Метрика",
+      `Счётчик ${counterId} (${siteName}): данные успешно выгружены.`,
+      "ok"
+    );
 
     return NextResponse.json({ ok: true, counterId: rowId, syncedAt: sync.payload.syncedAt });
   } catch (e) {

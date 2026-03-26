@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import BrandIcon from "@/app/components/BrandIcon";
 
 import type { IntegrationPanelsPayload, IntegrationTone } from "@/app/lib/integrationsPanels";
@@ -168,28 +168,37 @@ const crm: Item[] = [
   },
 ];
 
+const HISTORY_VISIBLE_DEFAULT = 4;
+
 export function SystemsPageClient() {
   const [panels, setPanels] = useState<IntegrationPanelsPayload | null>(null);
   const [panelsErr, setPanelsErr] = useState<string | null>(null);
+  const [historyExpanded, setHistoryExpanded] = useState(false);
 
   useEffect(() => {
     let alive = true;
-    fetch(resolveSameOriginApiUrl("/api/integrations/panels"), { credentials: "include" })
-      .then(async (res) => {
-        const j = (await res.json()) as IntegrationPanelsPayload & { error?: string };
-        if (!alive) return;
-        if (!res.ok) {
-          setPanelsErr(j.error || `HTTP ${res.status}`);
-          return;
-        }
-        setPanels(j);
-      })
-      .catch((e: unknown) => {
-        if (!alive) return;
-        setPanelsErr(e instanceof Error ? e.message : "Не удалось загрузить блоки");
-      });
+    const loadPanels = () => {
+      fetch(resolveSameOriginApiUrl("/api/integrations/panels"), { credentials: "include" })
+        .then(async (res) => {
+          const j = (await res.json()) as IntegrationPanelsPayload & { error?: string };
+          if (!alive) return;
+          if (!res.ok) {
+            setPanelsErr(j.error || `HTTP ${res.status}`);
+            return;
+          }
+          setPanels(j);
+          setPanelsErr(null);
+        })
+        .catch((e: unknown) => {
+          if (!alive) return;
+          setPanelsErr(e instanceof Error ? e.message : "Не удалось загрузить блоки");
+        });
+    };
+    loadPanels();
+    window.addEventListener("knopka:integrationsRefresh", loadPanels);
     return () => {
       alive = false;
+      window.removeEventListener("knopka:integrationsRefresh", loadPanels);
     };
   }, []);
 
@@ -203,6 +212,13 @@ export function SystemsPageClient() {
   const priorities = panels?.priorities ?? [];
   const history = panels?.history ?? [];
   const usedInReports = panels?.usedInReports ?? [];
+
+  const historyVisible = useMemo(() => {
+    if (historyExpanded || history.length <= HISTORY_VISIBLE_DEFAULT) return history;
+    return history.slice(0, HISTORY_VISIBLE_DEFAULT);
+  }, [history, historyExpanded]);
+
+  const historyMoreCount = Math.max(0, history.length - HISTORY_VISIBLE_DEFAULT);
 
   return (
     <div className="space-y-6">
@@ -373,7 +389,8 @@ export function SystemsPageClient() {
           <section className="rounded-2xl border border-neutral-200 bg-white p-5">
             <h2 className="text-base font-semibold">История подключений и ошибок</h2>
             <p className="mt-1 text-xs text-neutral-600">
-              Если что-то отвалилось — видно, когда и почему. Можно быстро понять, где затык. Время в МСК.
+              События копятся в журнале и не пропадают после удачных попыток. Время в МСК. По умолчанию
+              видно {HISTORY_VISIBLE_DEFAULT} последних — остальные можно раскрыть.
             </p>
 
             <div className="mt-4 space-y-2">
@@ -388,15 +405,31 @@ export function SystemsPageClient() {
                   Пока нет событий — появятся после подключений и синхронизаций.
                 </div>
               ) : (
-                history.map((h, i) => (
-                  <div key={`${i}-${h.title}`} className="rounded-xl border border-neutral-200 bg-white px-3 py-3">
-                    <div className="flex items-center gap-2 text-sm font-medium">
-                      <Dot tone={h.tone} />
-                      <span>{h.title}</span>
+                <>
+                  {historyVisible.map((h) => (
+                    <div
+                      key={h.id}
+                      className="rounded-xl border border-neutral-200 bg-white px-3 py-3"
+                    >
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Dot tone={h.tone} />
+                        <span>{h.title}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-neutral-600">{h.text}</div>
                     </div>
-                    <div className="mt-1 text-xs text-neutral-600">{h.text}</div>
-                  </div>
-                ))
+                  ))}
+                  {historyMoreCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setHistoryExpanded((v) => !v)}
+                      className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs font-medium text-neutral-800 hover:bg-neutral-100"
+                    >
+                      {historyExpanded
+                        ? "Свернуть список"
+                        : `Показать ещё (${historyMoreCount})`}
+                    </button>
+                  ) : null}
+                </>
               )}
             </div>
           </section>

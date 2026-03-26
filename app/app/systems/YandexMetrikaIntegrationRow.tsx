@@ -169,6 +169,7 @@ export function YandexMetrikaIntegrationRow() {
       refresh();
     } finally {
       setBusyId(null);
+      window.dispatchEvent(new Event("knopka:integrationsRefresh"));
     }
   };
 
@@ -190,6 +191,7 @@ export function YandexMetrikaIntegrationRow() {
       refresh();
     } finally {
       setBusyId(null);
+      window.dispatchEvent(new Event("knopka:integrationsRefresh"));
     }
   };
 
@@ -222,6 +224,7 @@ export function YandexMetrikaIntegrationRow() {
       refresh();
     } finally {
       setAddingFor(null);
+      window.dispatchEvent(new Event("knopka:integrationsRefresh"));
     }
   };
 
@@ -236,6 +239,7 @@ export function YandexMetrikaIntegrationRow() {
       return;
     }
     refresh();
+    window.dispatchEvent(new Event("knopka:integrationsRefresh"));
   };
 
   let topPill: { status: Status; text: string } = { status: "manual", text: "Проверка…" };

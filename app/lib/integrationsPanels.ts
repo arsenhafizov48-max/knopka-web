@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type IntegrationTone = "ok" | "warn" | "bad" | "info";
 
 export type HistoryItem = {
+  /** id строки в integration_activity — для ключей React */
+  id: string;
   tone: IntegrationTone;
   title: string;
   text: string;
@@ -45,10 +47,10 @@ export async function buildIntegrationPanels(
 ): Promise<IntegrationPanelsPayload> {
   const { data: activities } = await admin
     .from("integration_activity")
-    .select("source, message, tone, created_at")
+    .select("id, source, message, tone, created_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
-    .limit(30);
+    .limit(50);
 
   const { data: dirRows } = await admin.from("yandex_direct_oauth").select("id").eq("user_id", userId);
   const { data: ymOauthRows } = await admin
@@ -159,8 +161,15 @@ export async function buildIntegrationPanels(
   ];
 
   const history: HistoryItem[] = (activities ?? []).map((a) => {
-    const row = a as { source: string; message: string; tone?: string; created_at: string };
+    const row = a as {
+      id: string;
+      source: string;
+      message: string;
+      tone?: string;
+      created_at: string;
+    };
     return {
+      id: row.id,
       tone: normalizeTone(row.tone),
       title: formatHistoryTitleMsk(row.created_at, row.source),
       text: row.message,

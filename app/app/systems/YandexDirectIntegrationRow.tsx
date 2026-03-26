@@ -234,6 +234,7 @@ export function YandexDirectIntegrationRow() {
       refresh();
     } finally {
       setBusyId(null);
+      window.dispatchEvent(new Event("knopka:integrationsRefresh"));
     }
   };
 
@@ -255,6 +256,7 @@ export function YandexDirectIntegrationRow() {
       refresh();
     } finally {
       setBusyId(null);
+      window.dispatchEvent(new Event("knopka:integrationsRefresh"));
     }
   };
 

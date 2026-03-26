@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createSupabaseAuthRouteClient } from "@/app/lib/supabaseAuthRoute";
+import { logIntegrationActivity } from "@/app/lib/integrationActivity";
 import { getSupabaseServiceRoleClient } from "@/app/lib/supabaseServiceRole";
 import {
   syncAllYandexMetrikaCountersForUser,
@@ -89,6 +90,13 @@ async function runSync(request: Request) {
     results = await syncAllYandexMetrikaCountersForUser(admin, user.id);
   }
   if (results.length === 0) {
+    await logIntegrationActivity(
+      admin,
+      user.id,
+      "Яндекс Метрика",
+      "Синхронизация: нет счётчиков для выгрузки (добавьте номер в «Системы и данные»).",
+      "info"
+    );
     return NextResponse.json({
       ok: true,
       message: "Нет счётчиков — добавьте номер в «Системы и данные».",
@@ -97,12 +105,33 @@ async function runSync(request: Request) {
   }
   const failed = results.filter((r) => !r.ok);
   if (failed.length > 0 && results.length === failed.length) {
+    const errText = failed.map((f) => f.error).filter(Boolean).join(" · ") || "sync_failed";
+    await logIntegrationActivity(
+      admin,
+      user.id,
+      "Яндекс Метрика",
+      `Ошибка синхронизации: ${errText}`,
+      "bad"
+    );
     return NextResponse.json({
       ok: false,
-      error: failed.map((f) => f.error).filter(Boolean).join(" · ") || "sync_failed",
+      error: errText,
       results,
     });
   }
+
+  const okN = results.length - failed.length;
+  const msg =
+    failed.length === 0
+      ? `Синхронизация успешна: обновлено ${results.length} счётчик(ов).`
+      : `Синхронизация частично: успешно ${okN}, с ошибками ${failed.length}. ${failed.map((f) => f.error).filter(Boolean).join(" · ")}`;
+  await logIntegrationActivity(
+    admin,
+    user.id,
+    "Яндекс Метрика",
+    msg,
+    failed.length > 0 ? "warn" : "ok"
+  );
 
   return NextResponse.json({
     ok: true,
