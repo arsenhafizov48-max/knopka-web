@@ -1,7 +1,7 @@
 import type { StrategyDocument, StrategyTable } from "./types";
 
-/** Подменяет блок «2. Анализ спроса и конкурентов» данными из Вордстата + ИИ. */
-export function applyWordstatMarketSection(
+/** Подменяет раздел «3. Анализ спроса» данными из Вордстата + ИИ. */
+export function applyWordstatDemandSection(
   doc: StrategyDocument,
   payload: {
     paragraphs: string[];
@@ -14,10 +14,10 @@ export function applyWordstatMarketSection(
     ...doc,
     generatedAt: new Date().toISOString(),
     sections: doc.sections.map((s) =>
-      s.id === "market"
+      s.id === "demand"
         ? {
             ...s,
-            title: "2. Анализ спроса и конкурентов",
+            title: "3. Анализ спроса",
             paragraphs,
             bullets,
             tables: tables?.length ? tables : undefined,
@@ -26,3 +26,6 @@ export function applyWordstatMarketSection(
     ),
   };
 }
+
+/** @deprecated используйте applyWordstatDemandSection */
+export const applyWordstatMarketSection = applyWordstatDemandSection;

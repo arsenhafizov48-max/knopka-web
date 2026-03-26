@@ -5,7 +5,7 @@ import { BarChart3 } from "lucide-react";
 
 import type { ProjectFact } from "@/app/app/lib/projectFact";
 import { buildStrategyDocument } from "@/app/app/lib/strategy/buildFromFact";
-import { applyWordstatMarketSection } from "@/app/app/lib/strategy/applyWordstatMarket";
+import { applyWordstatDemandSection } from "@/app/app/lib/strategy/applyWordstatDemand";
 import { saveStrategy } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
 import { resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
@@ -73,7 +73,7 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
         return;
       }
       const base = doc ?? buildStrategyDocument(fact);
-      const next = applyWordstatMarketSection(base, {
+      const next = applyWordstatDemandSection(base, {
         paragraphs: data.market.paragraphs,
         bullets: data.market.bullets ?? [],
         tables: data.market.tables,

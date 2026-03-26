@@ -1,3 +1,4 @@
+import { migrateStrategyDocument } from "@/app/app/lib/strategy/migrateDocument";
 import type { StrategyDocument } from "./types";
 
 export const STRATEGY_STORAGE_KEY = "knopka.strategy.v1";
@@ -20,7 +21,8 @@ function safeParse(raw: string | null): Stored | null {
 export function loadStrategy(): StrategyDocument | null {
   if (typeof window === "undefined") return null;
   const s = safeParse(window.localStorage.getItem(STRATEGY_STORAGE_KEY));
-  return s?.document ?? null;
+  if (!s?.document) return null;
+  return migrateStrategyDocument(s.document);
 }
 
 export function saveStrategy(document: StrategyDocument) {

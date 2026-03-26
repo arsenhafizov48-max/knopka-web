@@ -2,6 +2,11 @@ import type { ProjectFact } from "@/app/app/lib/projectFact";
 import { describeProductService, normalizeText } from "@/app/app/lib/projectFact";
 import type { StrategyDocument, StrategySection } from "./types";
 
+export type BuildStrategyOptions = {
+  /** Текст из GET /api/integrations/summary (blockForAi) — сводка Директ/Метрика. */
+  integrationsBlock?: string;
+};
+
 function parseNum(s: string): number | null {
   const t = normalizeText(s).replace(/\s/g, "").replace(",", ".");
   const n = Number(t.replace(/[^\d.-]/g, ""));
@@ -18,74 +23,114 @@ function joinChannels(f: ProjectFact): string {
   return uniq.length ? uniq.join(", ") : "каналы уточняются";
 }
 
-export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
-  const now = new Date().toISOString();
-  const name = normalizeText(f.projectName) || "ваш проект";
-  const niche = normalizeText(f.niche);
-  const geo = normalizeText(f.geo);
-  const goal = normalizeText(f.goal);
-  const product = describeProductService(f) || "не указано";
-  const avgCheck = normalizeText(f.economics.averageCheck);
-  const margin = normalizeText(f.economics.marginPercent);
+function buildPointASection(fact: ProjectFact, integrationsBlock?: string): StrategySection {
+  const paragraphs: string[] = [];
+  if (integrationsBlock?.trim()) {
+    paragraphs.push(
+      "Ниже — сводка по подключённым системам (сервер КНОПКИ). Используйте её как фактическую «точку А» по маркетингу и рекламным аккаунтам."
+    );
+    for (const line of integrationsBlock.split("\n").map((l) => l.trim()).filter(Boolean)) {
+      paragraphs.push(line);
+    }
+  } else {
+    paragraphs.push(
+      "Здесь будет аналитика по уже подключённым каналам: Яндекс Директ, Метрика и др. Подключите системы в разделе «Системы и данные», дождитесь синхронизации и нажмите «Пересобрать стратегию» — блок заполнится выводами по кампаниям, визитам и структуре аккаунтов."
+    );
+  }
+  const active = fact.integrations?.filter((i) => i.status !== "not_connected") ?? [];
+  if (active.length) {
+    paragraphs.push(
+      "Статусы из фактуры: " + active.map((i) => `${i.title} (${i.status})`).join("; ") + "."
+    );
+  }
 
-  const curRev = parseNum(f.currentRevenue) ?? parseNum(f.pointA.revenue);
-  const curCli = parseNum(f.currentClients) ?? parseNum(f.pointA.clients);
-  const tgtRev = parseNum(f.targetRevenue) ?? parseNum(f.pointB.revenue);
-  const tgtCli = parseNum(f.targetClients) ?? parseNum(f.pointB.clients);
+  return {
+    id: "point_a",
+    title: "2. Точка А — анализ маркетинга",
+    paragraphs,
+    bullets: [
+      "Точка А — это «что есть по данным сейчас», без желаемого будущего.",
+      "Если Директ/Метрика не подключены, ориентируйтесь на фактуру и ручные отчёты до появления интеграций.",
+    ],
+  };
+}
+
+function buildDemandPlaceholder(): StrategySection {
+  return {
+    id: "demand",
+    title: "3. Анализ спроса",
+    paragraphs: [
+      "Этот раздел заполняется после запуска «Анализ спроса (Яндекс.Вордстат)» на вкладке «Спрос»: ИИ подбирает запросы и выдаёт таблицы спроса по вашей нише и региону.",
+    ],
+    bullets: [
+      "Без Вордстата не опирайтесь на «догадки по частотности» — либо запустите анализ, либо помечайте гипотезы как непроверенные.",
+    ],
+  };
+}
+
+function buildCompetitorsPlaceholder(): StrategySection {
+  return {
+    id: "competitors",
+    title: "4. Анализ конкурентов",
+    paragraphs: [
+      "Этот раздел заполняется после «Запустить анализ конкурентов» на вкладке «Конкуренты»: таблицы по сайтам, Яндекс.Картам и 2ГИС попадут сюда, в документ стратегии.",
+    ],
+    bullets: [
+      "В таблицах должны быть ссылки на сайты и карточки — проверяйте актуальность цен и офферов вручную.",
+      "Карты: ориентир радиуса 3 км от точки бизнеса — уточняйте под ваш адрес в фактуре.",
+    ],
+  };
+}
+
+export function buildStrategyDocument(fact: ProjectFact, opts?: BuildStrategyOptions): StrategyDocument {
+  const now = new Date().toISOString();
+  const name = normalizeText(fact.projectName) || "ваш проект";
+  const niche = normalizeText(fact.niche);
+  const geo = normalizeText(fact.geo);
+  const goal = normalizeText(fact.goal);
+  const product = describeProductService(fact) || "не указано";
+  const avgCheck = normalizeText(fact.economics.averageCheck);
+  const margin = normalizeText(fact.economics.marginPercent);
+
+  const curRev = parseNum(fact.currentRevenue) ?? parseNum(fact.pointA.revenue);
+  const curCli = parseNum(fact.currentClients) ?? parseNum(fact.pointA.clients);
+  const tgtRev = parseNum(fact.targetRevenue) ?? parseNum(fact.pointB.revenue);
+  const tgtCli = parseNum(fact.targetClients) ?? parseNum(fact.pointB.clients);
 
   const sections: StrategySection[] = [];
-
-  // 1. Цель и задача
-  const goalParagraphs: string[] = [
-    `Проект «${name}» в нише «${niche}», география: ${geo}.`,
-    `Сформулированная цель: ${goal}.`,
-    `Ключевое предложение: ${product}. Средний чек: ${avgCheck}.`,
-  ];
-  if (curRev !== null && curCli !== null) {
-    goalParagraphs.push(
-      `Точка А (оцифровка): выручка порядка ${fmtNum(curRev)} ₽, клиентов/сделок — ${fmtNum(curCli)} за выбранный период (как вы указали в фактуре).`
-    );
-  } else {
-    goalParagraphs.push(
-      "Точка А задана в качественном виде — для жёсткой математики воронки позже уточните период и единицы (месяц / квартал)."
-    );
-  }
-  if (tgtRev !== null && tgtCli !== null) {
-    goalParagraphs.push(
-      `Точка Б: целевая выручка порядка ${fmtNum(tgtRev)} ₽, целевое число клиентов/сделок — ${fmtNum(tgtCli)}.`
-    );
-  }
-  goalParagraphs.push(
-    "Дальнейшие шаги в кабинете КНОПКИ: закрепить метрики в разделе «Данные», затем сравнивать план и факт в отчётах."
-  );
 
   sections.push({
     id: "goal",
     title: "1. Цель и задача",
-    paragraphs: goalParagraphs,
+    paragraphs: [
+      `Проект «${name}» в нише «${niche}», география: ${geo}.`,
+      `Сформулированная цель: ${goal}.`,
+      `Ключевое предложение: ${product}. Средний чек: ${avgCheck}.`,
+      ...(curRev !== null && curCli !== null
+        ? [
+            `Точка А (оцифровка): выручка порядка ${fmtNum(curRev)} ₽, клиентов/сделок — ${fmtNum(curCli)} за выбранный период (как вы указали в фактуре).`,
+          ]
+        : [
+            "Точка А задана в качественном виде — для жёсткой математики воронки позже уточните период и единицы (месяц / квартал).",
+          ]),
+      ...(tgtRev !== null && tgtCli !== null
+        ? [
+            `Точка Б: целевая выручка порядка ${fmtNum(tgtRev)} ₽, целевое число клиентов/сделок — ${fmtNum(tgtCli)}.`,
+          ]
+        : []),
+      "Дальнейшие шаги в кабинете КНОПКИ: закрепить метрики в разделе «Данные», затем сравнивать план и факт в отчётах.",
+    ],
     bullets: [
       "Точка А и точка Б зафиксированы в фактуре — при изменении бизнеса обновите их, чтобы стратегия оставалась честной.",
       "Целевые показатели должны быть измеримыми: деньги, заявки, сделки, а не только «стало лучше».",
     ],
   });
 
-  // 2. Анализ спроса и конкурентов
-  sections.push({
-    id: "market",
-    title: "2. Анализ спроса и конкурентов",
-    paragraphs: [
-      `Рынок в нише «${niche}» в регионе «${geo}» без подключённых внешних данных (Вордстат, выдача, рекламные аукционы) мы описываем только на уровне вашей фактуры.`,
-      "Сильные игроки и занятые каналы в автоматическом режиме не подтягиваются — это запланировано в расширенной версии сервиса.",
-      "Что можно сделать уже сейчас: вручную зафиксировать 3–5 конкурентов и их витрины (сайт, Авито, соцсети) в заметках к проекту и перенести выводы в раздел «Планы».",
-    ],
-    bullets: [
-      "Без данных по спросу не стоит резать бюджеты «на глаз» — опирайтесь на тесты гипотез с лимитом расхода.",
-      "Когда появятся интеграции, этот блок дополнится цифрами по запросам и конкуренции.",
-    ],
-  });
+  sections.push(buildPointASection(fact, opts?.integrationsBlock));
+  sections.push(buildDemandPlaceholder());
+  sections.push(buildCompetitorsPlaceholder());
 
-  // 3. Что есть сейчас
-  const integConnected = f.integrations.filter((i) => i.status !== "not_connected");
+  const integConnected = fact.integrations.filter((i) => i.status !== "not_connected");
   const integText =
     integConnected.length > 0
       ? integConnected.map((i) => i.title).join(", ")
@@ -93,24 +138,23 @@ export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
 
   sections.push({
     id: "current",
-    title: "3. Что есть сейчас",
+    title: "5. Что есть сейчас",
     paragraphs: [
-      `Каналы (из онбординга): ${joinChannels(f)}.`,
+      `Каналы (из онбординга): ${joinChannels(fact)}.`,
       `Интеграции и системы: ${integText}.`,
-      normalizeText(f.goalDetails.marketingComment)
-        ? `Комментарий по маркетингу: ${normalizeText(f.goalDetails.marketingComment)}`
+      normalizeText(fact.goalDetails.marketingComment)
+        ? `Комментарий по маркетингу: ${normalizeText(fact.goalDetails.marketingComment)}`
         : "Отдельные комментарии по маркетингу в фактуре не заполнены — при необходимости добавьте их на экране фактуры.",
-      normalizeText(f.goalDetails.analyticsComment)
-        ? `Аналитика и учёт: ${normalizeText(f.goalDetails.analyticsComment)}`
+      normalizeText(fact.goalDetails.analyticsComment)
+        ? `Аналитика и учёт: ${normalizeText(fact.goalDetails.analyticsComment)}`
         : "",
     ].filter(Boolean),
-    bullets: f.channelBudgets
+    bullets: fact.channelBudgets
       .filter((r) => normalizeText(r.channel))
       .slice(0, 8)
       .map((r) => `${normalizeText(r.channel)} — заложено ${fmtNum(r.budget)} ₽/мес (по вашим данным).`),
   });
 
-  // 4. Декомпозиция точки Б
   const decParagraphs: string[] = [];
   if (curCli !== null && tgtCli !== null && curCli > 0) {
     const k = tgtCli / curCli;
@@ -140,7 +184,7 @@ export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
 
   sections.push({
     id: "decomposition",
-    title: "4. Декомпозиция точки Б",
+    title: "6. Декомпозиция точки Б",
     paragraphs: decParagraphs,
     bullets: [
       "Свяжите цель с воронкой: трафик → заявки → квалификация → сделка.",
@@ -148,18 +192,17 @@ export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
     ],
   });
 
-  // 5. Каналы и приоритеты
-  const withBudget = f.channelBudgets
+  const withBudget = fact.channelBudgets
     .filter((r) => normalizeText(r.channel))
     .sort((a, b) => b.budget - a.budget);
   const ordered = withBudget.length
     ? withBudget.map((r) => normalizeText(r.channel))
-    : [...new Set([...(f.channels.connected ?? []), ...(f.channels.planned ?? [])])].filter(Boolean);
+    : [...new Set([...(fact.channels.connected ?? []), ...(fact.channels.planned ?? [])])].filter(Boolean);
 
   const channelBullets =
     ordered.length > 0
       ? ordered.map((ch, i) => {
-          const row = f.channelBudgets.find((r) => normalizeText(r.channel) === ch);
+          const row = fact.channelBudgets.find((r) => normalizeText(r.channel) === ch);
           const b = row && row.budget > 0 ? ` (бюджет ${fmtNum(row.budget)} ₽/мес)` : "";
           return `${i + 1}. ${ch}${b} — приоритет по важности для вашей текущей фактуры.`;
         })
@@ -167,7 +210,7 @@ export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
 
   sections.push({
     id: "channels",
-    title: "5. Каналы и приоритеты",
+    title: "7. Каналы и приоритеты",
     paragraphs: [
       "Быстрый эффект чаще дают каналы с уже тёплой аудиторией и понятным спросом (контекст по высокоинтентным запросам, маркетплейсы, рекомендации).",
       "В долгую работают контент, SEO, бренд и работа с повторными продажами — их разумно подключать, когда поток заявок стабилен.",
@@ -176,8 +219,7 @@ export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
     bullets: channelBullets,
   });
 
-  // 6. Бюджеты и специалисты
-  const specBullets = f.specialistCosts
+  const specBullets = fact.specialistCosts
     .filter((r) => normalizeText(r.role))
     .map(
       (r) =>
@@ -186,7 +228,7 @@ export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
 
   sections.push({
     id: "budget",
-    title: "6. Бюджеты и специалисты",
+    title: "8. Бюджеты и специалисты",
     paragraphs: [
       "Варианты исполнения: силами компании, фрилансер, агентство. Выбор зависит от скорости, риска и доступной экспертизы.",
       "Закрепите верхнюю границу тестового бюджета на канал и срок проверки гипотезы (например, 2–3 недели при достаточном объёме показов).",
@@ -199,10 +241,9 @@ export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
           ],
   });
 
-  // 7. Что делать дальше
   sections.push({
     id: "next",
-    title: "7. Что делать дальше",
+    title: "9. Что делать дальше",
     paragraphs: [
       "Ниже — порядок действий, согласованный с логикой КНОПКИ: сначала ясность и учёт, потом масштабирование.",
     ],
@@ -219,7 +260,7 @@ export function buildStrategyDocument(f: ProjectFact): StrategyDocument {
   return {
     version: 1,
     generatedAt: now,
-    factSnapshotUpdatedAt: f.updatedAt,
+    factSnapshotUpdatedAt: fact.updatedAt,
     sections,
   };
 }

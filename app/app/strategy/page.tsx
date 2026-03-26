@@ -17,8 +17,21 @@ import { StrategyCompetitorAnalysis } from "@/app/app/components/StrategyCompeti
 import { StrategyGigaChat } from "@/app/app/components/StrategyGigaChat";
 import { StrategyWordstatDemand } from "@/app/app/components/StrategyWordstatDemand";
 import { downloadStrategyDocumentPdf } from "@/app/app/lib/strategy/strategyPdfExport";
+import { resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
 
 type StrategyAreaTab = "demand" | "competitors";
+
+async function fetchIntegrationsBlock(): Promise<string> {
+  try {
+    const res = await fetch(resolveSameOriginApiUrl("/api/integrations/summary"), {
+      credentials: "same-origin",
+    });
+    const j = (await res.json()) as { blockForAi?: string };
+    return typeof j.blockForAi === "string" ? j.blockForAi : "";
+  } catch {
+    return "";
+  }
+}
 
 export default function StrategyPage() {
   const [fact, setFact] = useState<ProjectFact | null>(null);
@@ -46,11 +59,12 @@ export default function StrategyPage() {
 
   const gaps = useMemo(() => (fact ? getStrategyGaps(fact) : { ok: false, items: [] }), [fact]);
 
-  const onGenerate = () => {
+  const onGenerate = async () => {
     if (!fact || !gaps.ok) return;
     setBusy(true);
     try {
-      const next = buildStrategyDocument(fact);
+      const integrationsBlock = await fetchIntegrationsBlock();
+      const next = buildStrategyDocument(fact, { integrationsBlock });
       saveStrategy(next);
       setDoc(next);
     } finally {
@@ -58,11 +72,12 @@ export default function StrategyPage() {
     }
   };
 
-  const onRegenerate = () => {
+  const onRegenerate = async () => {
     if (!fact || !gaps.ok) return;
     setBusy(true);
     try {
-      const next = buildStrategyDocument(fact);
+      const integrationsBlock = await fetchIntegrationsBlock();
+      const next = buildStrategyDocument(fact, { integrationsBlock });
       saveStrategy(next);
       setDoc(next);
     } finally {
@@ -173,7 +188,7 @@ export default function StrategyPage() {
         {areaTab === "demand" ? (
           <StrategyWordstatDemand fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
         ) : (
-          <StrategyCompetitorAnalysis fact={fact} gapsOk={gaps.ok} />
+          <StrategyCompetitorAnalysis fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
         )}
       </div>
 
@@ -265,10 +280,10 @@ export default function StrategyPage() {
                 </summary>
                 <div className="border-t border-neutral-100 px-5 pb-5 pt-3">
                   {(() => {
-                    const marketDataFirst =
+                    const tablesLeadFirst =
                       (sec.tables?.length ?? 0) > 0 && sec.paragraphs.length > 0;
-                    const lead = marketDataFirst ? sec.paragraphs[0] : null;
-                    const bodyParas = marketDataFirst ? sec.paragraphs.slice(1) : sec.paragraphs;
+                    const lead = tablesLeadFirst ? sec.paragraphs[0] : null;
+                    const bodyParas = tablesLeadFirst ? sec.paragraphs.slice(1) : sec.paragraphs;
                     return (
                       <>
                         {lead ? (
@@ -313,7 +328,7 @@ export default function StrategyPage() {
                         ) : null}
                         <div
                           className={
-                            lead || (sec.tables && sec.tables.length > 0)
+                            lead || (sec.tables?.length ?? 0) > 0
                               ? "mt-4 space-y-3 text-sm text-neutral-700"
                               : "space-y-3 text-sm text-neutral-700"
                           }

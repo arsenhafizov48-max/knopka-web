@@ -32,10 +32,18 @@ function channel(v: unknown): CompetitorChannelHint {
 }
 
 function siteRow(o: Record<string, unknown>, idx: number): CompetitorSiteRow {
+  const siteUrl =
+    str(o.siteUrl) ||
+    str(o.site_url) ||
+    str(o.url) ||
+    str(o.link) ||
+    "";
+  const name = str(o.competitor) || str(o.name) || "—";
   return {
     num: num(o.num, idx + 1),
     top: str(o.top) || "—",
-    competitor: str(o.competitor) || str(o.name) || "—",
+    competitor: name,
+    siteUrl,
     segment: str(o.segment) || "—",
     priceAnchor: str(o.priceAnchor) || str(o.price_anchor) || "—",
     positioning: str(o.positioning) || str(o.offer) || "—",
@@ -47,12 +55,26 @@ function siteRow(o: Record<string, unknown>, idx: number): CompetitorSiteRow {
 }
 
 function mapRow(o: Record<string, unknown>, idx: number): CompetitorMapRow {
+  const ratingStars = str(o.ratingStars) || str(o.rating_stars) || str(o.stars);
+  const ratingsCount = str(o.ratingsCount) || str(o.ratings_count) || str(o.votes);
+  const reviewsCount = str(o.reviewsCount) || str(o.reviews_count) || str(o.reviewCount);
+  const ratingLegacy = str(o.rating) || str(o.reviews);
+
   return {
     num: num(o.num, idx + 1),
     top: str(o.top) || "—",
     competitor: str(o.competitor) || str(o.name) || "—",
-    location: str(o.location) || str(o.metro) || "—",
-    rating: str(o.rating) || str(o.reviews) || "—",
+    mapUrl: str(o.mapUrl) || str(o.map_url) || str(o.url) || str(o.link) || "",
+    location: str(o.location) || str(o.metro) || str(o.address) || "—",
+    rating:
+      ratingLegacy ||
+      [ratingStars && `★${ratingStars}`, ratingsCount && `оценок: ${ratingsCount}`, reviewsCount && `отзывов: ${reviewsCount}`]
+        .filter(Boolean)
+        .join(" · ") ||
+      "—",
+    ratingStars: ratingStars || "—",
+    ratingsCount: ratingsCount || "—",
+    reviewsCount: reviewsCount || "—",
     cardSnippet: str(o.cardSnippet) || str(o.snippet) || str(o.card) || "—",
     strengthMaps: str(o.strengthMaps) || str(o.strength) || "—",
     weakness: str(o.weakness) || str(o.weaknesses) || "—",

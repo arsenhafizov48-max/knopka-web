@@ -1,11 +1,15 @@
 export type StrategySectionId =
   | "goal"
-  | "market"
+  | "point_a"
+  | "demand"
+  | "competitors"
   | "current"
   | "decomposition"
   | "channels"
   | "budget"
-  | "next";
+  | "next"
+  /** @deprecated заменён на demand + competitors */
+  | "market";
 
 /** Таблица внутри раздела (например список запросов Вордстата). */
 export type StrategyTable = {

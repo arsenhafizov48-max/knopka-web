@@ -1,3 +1,4 @@
+import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
 
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
@@ -36,7 +37,7 @@ function wrapParagraph(text: string, font: PDFFont, size: number, maxWidth: numb
   return out.length ? out : [""];
 }
 
-/** Скачивание стратегии как PDF (не конвертация из Excel). */
+/** Скачивание стратегии как PDF (кириллица через Noto + @pdf-lib/fontkit). */
 export async function downloadStrategyDocumentPdf(doc: StrategyDocument, filename = "strategiya-knopka.pdf") {
   let fontBytes: Uint8Array;
   try {
@@ -48,7 +49,8 @@ export async function downloadStrategyDocumentPdf(doc: StrategyDocument, filenam
   }
 
   const pdf = await PDFDocument.create();
-  const font = await pdf.embedFont(fontBytes);
+  pdf.registerFontkit(fontkit);
+  const font = await pdf.embedFont(fontBytes, { subset: true });
 
   const pageW = 595;
   const pageH = 842;
