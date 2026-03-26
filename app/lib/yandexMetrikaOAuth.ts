@@ -1,6 +1,8 @@
 import { withBasePath } from "@/app/lib/publicBasePath";
 
 export const YANDEX_METRIKA_OAUTH_STATE_COOKIE = "yandex_metrika_oauth_state";
+/** `add` — новое подключение Метрики; иначе только первое подключение. */
+export const YANDEX_METRIKA_OAUTH_INTENT_COOKIE = "yandex_metrika_oauth_intent";
 export const YANDEX_METRIKA_SCOPE = "metrika:read";
 
 export function getYandexMetrikaRedirectUri(requestUrl: string): string {

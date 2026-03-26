@@ -5,8 +5,34 @@ import { getSupabaseServiceRoleClient } from "@/app/lib/supabaseServiceRole";
 import { ensureYandexMetrikaAccessToken } from "@/app/lib/yandexMetrikaEnsureToken";
 import { syncYandexMetrikaCounter } from "@/app/lib/yandexMetrikaSync";
 
-/** Список счётчиков из API Метрики (для выбора). */
-export async function GET() {
+async function resolveConnectionId(
+  admin: ReturnType<typeof getSupabaseServiceRoleClient>,
+  userId: string,
+  explicit: string | null
+): Promise<{ id: string } | { error: string }> {
+  if (explicit) {
+    const { data } = await admin
+      .from("yandex_metrika_oauth")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("id", explicit)
+      .maybeSingle();
+    if (!data?.id) return { error: "connection_not_found" };
+    return { id: data.id as string };
+  }
+  const { data: first } = await admin
+    .from("yandex_metrika_oauth")
+    .select("id")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!first?.id) return { error: "metrika_not_connected" };
+  return { id: first.id as string };
+}
+
+/** Список счётчиков из API Метрики (для выбора). Query: connectionId. */
+export async function GET(request: Request) {
   const supabase = await createSupabaseAuthRouteClient();
   const {
     data: { user },
@@ -16,6 +42,8 @@ export async function GET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const connectionIdParam = new URL(request.url).searchParams.get("connectionId")?.trim() ?? "";
+
   let admin;
   try {
     admin = getSupabaseServiceRoleClient();
@@ -23,8 +51,13 @@ export async function GET() {
     return NextResponse.json({ error: "service_role_missing" }, { status: 503 });
   }
 
+  const resolved = await resolveConnectionId(admin, user.id, connectionIdParam || null);
+  if ("error" in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: 400 });
+  }
+
   try {
-    const token = await ensureYandexMetrikaAccessToken(admin, user.id);
+    const token = await ensureYandexMetrikaAccessToken(admin, user.id, resolved.id);
     const res = await fetch("https://api-metrika.yandex.net/management/v1/counters", {
       headers: { Authorization: `OAuth ${token}` },
     });
@@ -37,7 +70,12 @@ export async function GET() {
     }
     if (!res.ok) {
       return NextResponse.json(
-        { error: typeof json === "object" && json && "message" in json ? (json as any).message : text },
+        {
+          error:
+            typeof json === "object" && json && "message" in json
+              ? String((json as { message?: unknown }).message)
+              : text,
+        },
         { status: res.status }
       );
     }
@@ -47,14 +85,14 @@ export async function GET() {
       name: c.name ?? "",
       site: c.site ?? "",
     }));
-    return NextResponse.json({ counters });
+    return NextResponse.json({ counters, connectionId: resolved.id });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ error: msg }, { status: 400 });
   }
 }
 
-type PostBody = { counterId?: number };
+type PostBody = { counterId?: number; connectionId?: string };
 
 /** Добавить счётчик по номеру и сразу синхронизировать. */
 export async function POST(request: Request) {
@@ -79,6 +117,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "counterId required" }, { status: 400 });
   }
 
+  const connectionIdParam =
+    typeof body.connectionId === "string" ? body.connectionId.trim() : "";
+
   let admin;
   try {
     admin = getSupabaseServiceRoleClient();
@@ -86,8 +127,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "service_role_missing" }, { status: 503 });
   }
 
+  const resolved = await resolveConnectionId(
+    admin,
+    user.id,
+    connectionIdParam || null
+  );
+  if ("error" in resolved) {
+    return NextResponse.json({ error: resolved.error }, { status: 400 });
+  }
+  const connectionId = resolved.id;
+
   try {
-    const token = await ensureYandexMetrikaAccessToken(admin, user.id);
+    const token = await ensureYandexMetrikaAccessToken(admin, user.id, connectionId);
     const res = await fetch(
       `https://api-metrika.yandex.net/management/v1/counter/${counterId}`,
       { headers: { Authorization: `OAuth ${token}` } }
@@ -105,21 +156,20 @@ export async function POST(request: Request) {
       .from("yandex_metrika_counters")
       .select("id")
       .eq("user_id", user.id)
+      .eq("connection_id", connectionId)
       .eq("counter_id", counterId)
       .maybeSingle();
 
     let rowId: string;
     if (existing?.id) {
       rowId = existing.id as string;
-      await admin
-        .from("yandex_metrika_counters")
-        .update({ site_name: siteName })
-        .eq("id", rowId);
+      await admin.from("yandex_metrika_counters").update({ site_name: siteName }).eq("id", rowId);
     } else {
       const { data: ins, error: insErr } = await admin
         .from("yandex_metrika_counters")
         .insert({
           user_id: user.id,
+          connection_id: connectionId,
           counter_id: counterId,
           site_name: siteName,
         })

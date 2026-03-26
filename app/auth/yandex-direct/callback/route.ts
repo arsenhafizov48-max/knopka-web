@@ -1,11 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 
 import { createSupabaseAuthRouteClient } from "@/app/lib/supabaseAuthRoute";
+import { logIntegrationActivity } from "@/app/lib/integrationActivity";
 import { getSupabaseServiceRoleClient } from "@/app/lib/supabaseServiceRole";
 import { withBasePath } from "@/app/lib/publicBasePath";
 import {
   getYandexDirectRedirectUri,
+  YANDEX_DIRECT_OAUTH_INTENT_COOKIE,
   YANDEX_DIRECT_OAUTH_STATE_COOKIE,
 } from "@/app/lib/yandexDirectOAuth";
 import { getYandexPassportProfile } from "@/app/lib/yandexPassportLogin";
@@ -34,7 +37,12 @@ export async function GET(request: Request) {
 
   const cookieStore = await cookies();
   const expected = cookieStore.get(YANDEX_DIRECT_OAUTH_STATE_COOKIE)?.value;
+  const intent = cookieStore.get(YANDEX_DIRECT_OAUTH_INTENT_COOKIE)?.value ?? "default";
   cookieStore.set(YANDEX_DIRECT_OAUTH_STATE_COOKIE, "", {
+    path: "/",
+    maxAge: 0,
+  });
+  cookieStore.set(YANDEX_DIRECT_OAUTH_INTENT_COOKIE, "", {
     path: "/",
     maxAge: 0,
   });
@@ -114,22 +122,59 @@ export async function GET(request: Request) {
 
   const passport = await getYandexPassportProfile(accessToken).catch(() => null);
 
-  const { error: upsertError } = await admin.from("yandex_direct_oauth").upsert(
-    {
-      user_id: user.id,
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      expires_at: expiresAt,
-      updated_at: new Date().toISOString(),
-      yandex_login: passport?.login ?? null,
-      yandex_email: passport?.defaultEmail ?? null,
-    },
-    { onConflict: "user_id" }
-  );
+  const { count: existingCount, error: countErr } = await admin
+    .from("yandex_direct_oauth")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
 
-  if (upsertError) {
-    return systemsRedirect(origin, { yd_error: upsertError.message });
+  if (countErr) {
+    return systemsRedirect(origin, { yd_error: countErr.message });
   }
+
+  const n = existingCount ?? 0;
+  const row = {
+    user_id: user.id,
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    expires_at: expiresAt,
+    updated_at: new Date().toISOString(),
+    yandex_login: passport?.login ?? null,
+    yandex_email: passport?.defaultEmail ?? null,
+  };
+
+  let insertError: { message: string } | null = null;
+  if (intent === "add") {
+    const { error } = await admin.from("yandex_direct_oauth").insert({
+      id: randomUUID(),
+      ...row,
+    });
+    insertError = error;
+  } else if (n === 0) {
+    const { error } = await admin.from("yandex_direct_oauth").insert({
+      id: randomUUID(),
+      ...row,
+    });
+    insertError = error;
+  } else {
+    return systemsRedirect(origin, {
+      yd_error:
+        "Уже есть подключение Директа. Нажмите «Подключить ещё аккаунт» или отключите существующее.",
+    });
+  }
+
+  if (insertError) {
+    return systemsRedirect(origin, { yd_error: insertError.message });
+  }
+
+  const label =
+    passport?.defaultEmail ?? passport?.login ?? "новый аккаунт";
+  await logIntegrationActivity(
+    admin,
+    user.id,
+    "Яндекс Директ",
+    `Подключён аккаунт: ${label}.`,
+    "ok"
+  );
 
   return systemsRedirect(origin, { yd: "connected" });
 }

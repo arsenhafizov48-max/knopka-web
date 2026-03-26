@@ -34,15 +34,19 @@ type SnapshotInfo = {
 
 type YandexAccount = { login: string | null; email: string | null };
 
+type Conn = {
+  id: string;
+  expiresAt: string | null;
+  yandexAccount: YandexAccount | null;
+  snapshot: SnapshotInfo | null;
+};
+
 type YandexState =
   | { kind: "loading" }
   | {
       kind: "ok";
-      connected: boolean;
-      expiresAt: string | null;
       serverError?: string;
-      yandexAccount: YandexAccount | null;
-      snapshot: SnapshotInfo | null;
+      connections: Conn[];
     }
   | { kind: "error"; message: string };
 
@@ -51,69 +55,104 @@ const ICON = {
   fallback: "Я",
 } as const;
 
+function accountLabel(ya: YandexAccount | null): string | null {
+  if (!ya) return null;
+  if (ya.email && ya.login) return `${ya.email} (@${ya.login})`;
+  if (ya.email) return ya.email;
+  if (ya.login) return `@${ya.login}`;
+  return null;
+}
+
+function oneCardMeta(c: Conn): { pill: { status: Status; text: string }; meta: string } {
+  const ya = c.yandexAccount;
+  const accountLine = accountLabel(ya);
+  const snap = c.snapshot;
+  const isPartial = snap?.status === "partial";
+  const pill = !c.yandexAccount?.email && !c.yandexAccount?.login
+    ? { status: "partial" as const, text: "Подключено" }
+    : isPartial
+      ? { status: "partial" as const, text: "Частично" }
+      : { status: "connected" as const, text: "Подключено" };
+
+  const tokenLine = c.expiresAt
+    ? `Токен до ${new Date(c.expiresAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}.`
+    : "Аккаунт привязан.";
+  let snapLine = " Снимок структуры: ещё не выгружали — нажмите «Синхронизировать».";
+  if (snap?.syncedAt) {
+    const t = new Date(snap.syncedAt).toLocaleString("ru-RU", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+    if (snap.status === "error" && snap.errorMessage) {
+      snapLine = ` Последняя выгрузка ${t}: ошибка — ${snap.errorMessage}`;
+    } else if (isPartial && snap.errorMessage) {
+      const co = snap.counts;
+      const cnt = co
+        ? `кампаний ${co.campaigns}, групп ${co.adGroups}, объявлений ${co.ads}, фраз ${co.keywords}. `
+        : "";
+      snapLine = ` Выгрузка ${t}: ${cnt}Не всё выгрузилось: ${snap.errorMessage}`;
+    } else if (snap.counts) {
+      snapLine = ` Выгрузка ${t}: кампаний ${snap.counts.campaigns}, групп ${snap.counts.adGroups}, объявлений ${snap.counts.ads}, фраз ${snap.counts.keywords}.`;
+    } else {
+      snapLine = ` Выгрузка ${t}.`;
+    }
+  }
+  return { pill, meta: tokenLine + snapLine + (accountLine ? "" : "") };
+}
+
 export function YandexDirectIntegrationRow() {
   const [st, setSt] = useState<YandexState>({ kind: "loading" });
   const [flash, setFlash] = useState<{ text: string; kind: "ok" | "err" | "warn" } | null>(null);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setSt({ kind: "loading" });
     fetch(resolveSameOriginApiUrl("/api/yandex-direct/status"), { credentials: "include" })
       .then(async (res) => {
         const j = (await res.json()) as {
-          connected?: boolean;
           authenticated?: boolean;
-          expiresAt?: string | null;
           error?: string;
-          yandexAccount?: YandexAccount | null;
-          snapshot?: {
-            syncedAt: string | null;
-            status: string | null;
-            errorMessage: string | null;
-            counts: SnapshotInfo["counts"];
-          } | null;
+          connections?: Array<{
+            id: string;
+            expiresAt?: string | null;
+            yandexAccount?: YandexAccount | null;
+            snapshot?: {
+              syncedAt: string | null;
+              status: string | null;
+              errorMessage: string | null;
+              counts: SnapshotInfo["counts"];
+            } | null;
+          }>;
         };
         if (!res.ok) {
           setSt({
             kind: "ok",
-            connected: false,
-            expiresAt: null,
             serverError: j.error || `HTTP ${res.status}`,
-            yandexAccount: null,
-            snapshot: null,
+            connections: [],
           });
           return;
         }
         if (!j.authenticated) {
-          setSt({
-            kind: "ok",
-            connected: false,
-            expiresAt: null,
-            yandexAccount: null,
-            snapshot: null,
-          });
+          setSt({ kind: "ok", connections: [] });
           return;
         }
-        const snap = j.snapshot;
-        const ya = j.yandexAccount;
+        const list = Array.isArray(j.connections) ? j.connections : [];
         setSt({
           kind: "ok",
-          connected: !!j.connected,
-          expiresAt: j.expiresAt ?? null,
           serverError: j.error,
-          yandexAccount:
-            ya && (ya.email || ya.login)
-              ? { login: ya.login ?? null, email: ya.email ?? null }
+          connections: list.map((row) => ({
+            id: row.id,
+            expiresAt: row.expiresAt ?? null,
+            yandexAccount: row.yandexAccount ?? null,
+            snapshot: row.snapshot
+              ? {
+                  syncedAt: row.snapshot.syncedAt ?? null,
+                  status: row.snapshot.status ?? null,
+                  errorMessage: row.snapshot.errorMessage ?? null,
+                  counts: row.snapshot.counts ?? null,
+                }
               : null,
-          snapshot: snap
-            ? {
-                syncedAt: snap.syncedAt ?? null,
-                status: snap.status ?? null,
-                errorMessage: snap.errorMessage ?? null,
-                counts: snap.counts ?? null,
-              }
-            : null,
+          })),
         });
       })
       .catch((e: unknown) => {
@@ -156,12 +195,14 @@ export function YandexDirectIntegrationRow() {
     return () => window.clearTimeout(t);
   }, [flash]);
 
-  const onSync = async () => {
-    setSyncing(true);
+  const onSync = async (connectionId: string) => {
+    setBusyId(connectionId);
     try {
       const res = await fetch(resolveSameOriginApiUrl("/api/yandex-direct/sync"), {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId }),
       });
       const j = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -192,85 +233,49 @@ export function YandexDirectIntegrationRow() {
       }
       refresh();
     } finally {
-      setSyncing(false);
+      setBusyId(null);
     }
   };
 
-  const onDisconnect = async () => {
-    setDisconnecting(true);
+  const onDisconnect = async (connectionId: string) => {
+    setBusyId(connectionId);
     try {
       const res = await fetch(resolveSameOriginApiUrl("/api/yandex-direct/disconnect"), {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId }),
       });
       const j = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
         setFlash({ text: j.error || "Не удалось отключить", kind: "err" });
         return;
       }
-      setFlash({ text: "Яндекс Директ отключён.", kind: "ok" });
+      setFlash({ text: "Подключение Директа отключено.", kind: "ok" });
       refresh();
     } finally {
-      setDisconnecting(false);
+      setBusyId(null);
     }
   };
 
-  let pill: { status: Status; text: string };
-  let meta: string;
-  let accountLine: string | null = null;
+  let topPill: { status: Status; text: string } = { status: "manual", text: "Проверка…" };
+  let topMeta = "";
 
   if (st.kind === "loading") {
-    pill = { status: "manual", text: "Проверка…" };
-    meta = "Запрашиваем статус подключения…";
+    topPill = { status: "manual", text: "Проверка…" };
+    topMeta = "Запрашиваем статус подключения…";
   } else if (st.kind === "error") {
-    pill = { status: "disconnected", text: "Ошибка" };
-    meta = st.message;
+    topPill = { status: "disconnected", text: "Ошибка" };
+    topMeta = st.message;
   } else if (st.serverError === "service_role_missing") {
-    pill = { status: "partial", text: "Сервер" };
-    meta = "Задайте SUPABASE_SERVICE_ROLE_KEY на Vercel — иначе токен не сохранить.";
-  } else if (!st.connected) {
-    pill = { status: "disconnected", text: "Не подключено" };
-    meta = "OAuth: доступ к API Директа для вашего аккаунта.";
+    topPill = { status: "partial", text: "Сервер" };
+    topMeta = "Задайте SUPABASE_SERVICE_ROLE_KEY на Vercel — иначе токен не сохранить.";
+  } else if (st.connections.length === 0) {
+    topPill = { status: "disconnected", text: "Не подключено" };
+    topMeta = "OAuth: доступ к API Директа для вашего аккаунта.";
   } else {
-    const ya = st.yandexAccount;
-    if (ya) {
-      if (ya.email && ya.login) {
-        accountLine = `${ya.email} (@${ya.login})`;
-      } else if (ya.email) {
-        accountLine = ya.email;
-      } else if (ya.login) {
-        accountLine = `@${ya.login}`;
-      }
-    }
-    const snap = st.snapshot;
-    const isPartial = snap?.status === "partial";
-    pill = isPartial
-      ? { status: "partial", text: "Частично" }
-      : { status: "connected", text: "Подключено" };
-    const tokenLine = st.expiresAt
-      ? `Токен до ${new Date(st.expiresAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}.`
-      : "Аккаунт привязан.";
-    let snapLine = " Снимок структуры: ещё не выгружали — нажмите «Синхронизировать».";
-    if (snap?.syncedAt) {
-      const t = new Date(snap.syncedAt).toLocaleString("ru-RU", {
-        dateStyle: "short",
-        timeStyle: "short",
-      });
-      if (snap.status === "error" && snap.errorMessage) {
-        snapLine = ` Последняя выгрузка ${t}: ошибка — ${snap.errorMessage}`;
-      } else if (isPartial && snap.errorMessage) {
-        const c = snap.counts;
-        const cnt = c
-          ? `кампаний ${c.campaigns}, групп ${c.adGroups}, объявлений ${c.ads}, фраз ${c.keywords}. `
-          : "";
-        snapLine = ` Выгрузка ${t}: ${cnt}Не всё выгрузилось: ${snap.errorMessage}`;
-      } else if (snap.counts) {
-        snapLine = ` Выгрузка ${t}: кампаний ${snap.counts.campaigns}, групп ${snap.counts.adGroups}, объявлений ${snap.counts.ads}, фраз ${snap.counts.keywords}.`;
-      } else {
-        snapLine = ` Выгрузка ${t}.`;
-      }
-    }
-    meta = tokenLine + snapLine;
+    topPill = { status: "connected", text: `${st.connections.length} аккаунт(ов)` };
+    topMeta = "Несколько кабинетов Директа можно подключить с разных Яндекс-аккаунтов.";
   }
 
   return (
@@ -290,69 +295,92 @@ export function YandexDirectIntegrationRow() {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          <div
-            className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border text-sm font-semibold ${ICON.tint}`}
-            title="Яндекс"
-          >
-            {ICON.fallback}
-          </div>
-
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="font-medium">Яндекс Директ</div>
-              <div className="text-xs text-neutral-500">Реклама</div>
-            </div>
-            {st.kind === "ok" && st.connected && accountLine ? (
-              <div className="mt-0.5 text-xs text-neutral-800">
-                Подключён аккаунт: <span className="font-medium">{accountLine}</span>
-              </div>
-            ) : null}
-            <div className="mt-1 text-xs text-neutral-500">{meta}</div>
-          </div>
-        </div>
-
-        <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-          <StatusPill status={pill.status} text={pill.text} />
-
-          {st.kind === "ok" && st.serverError !== "service_role_missing" && !st.connected ? (
-            <a
-              href={withBasePathResolved("/api/yandex-direct/authorize")}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 sm:justify-end"
+      <div className="rounded-xl border border-neutral-200 bg-white px-3 py-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border text-sm font-semibold ${ICON.tint}`}
+              title="Яндекс"
             >
-              Подключить <ArrowUpRight className="h-3.5 w-3.5" />
-            </a>
-          ) : null}
-
-          {st.kind === "ok" && st.connected ? (
-            <>
-              <button
-                type="button"
-                disabled={syncing}
-                onClick={() => void onSync()}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-60 sm:justify-end"
+              {ICON.fallback}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="font-medium">Яндекс Директ</div>
+                <div className="text-xs text-neutral-500">Реклама</div>
+              </div>
+              <div className="mt-1 text-xs text-neutral-500">{topMeta}</div>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+            <StatusPill status={topPill.status} text={topPill.text} />
+            {st.kind === "ok" && st.serverError !== "service_role_missing" && st.connections.length === 0 ? (
+              <a
+                href={withBasePathResolved("/api/yandex-direct/authorize")}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 sm:justify-end"
               >
-                <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "Синхронизация…" : "Синхронизировать"}
-              </button>
-              <Link
-                href="/app/yandex-direct-data"
-                className="text-center text-xs font-medium text-blue-600 hover:text-blue-700 sm:text-right"
-              >
-                Открыть выгруженные данные →
-              </Link>
-              <button
-                type="button"
-                disabled={disconnecting}
-                onClick={() => void onDisconnect()}
-                className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium hover:bg-neutral-50 disabled:opacity-60"
-              >
-                {disconnecting ? "Отключаем…" : "Отключить"}
-              </button>
-            </>
-          ) : null}
+                Подключить <ArrowUpRight className="h-3.5 w-3.5" />
+              </a>
+            ) : null}
+          </div>
         </div>
+
+        {st.kind === "ok" && st.connections.length > 0 ? (
+          <div className="mt-4 space-y-3 border-t border-neutral-100 pt-3">
+            {st.connections.map((c) => {
+              const { pill, meta } = oneCardMeta(c);
+              const acc = accountLabel(c.yandexAccount);
+              const syncing = busyId === c.id;
+              return (
+                <div
+                  key={c.id}
+                  className="flex flex-col gap-2 rounded-lg border border-neutral-100 bg-neutral-50/50 px-3 py-2 sm:flex-row sm:items-start sm:justify-between"
+                >
+                  <div className="min-w-0">
+                    {acc ? (
+                      <div className="text-xs font-medium text-neutral-800">{acc}</div>
+                    ) : (
+                      <div className="text-xs text-neutral-600">Аккаунт Яндекса</div>
+                    )}
+                    <div className="mt-0.5 text-xs text-neutral-500">{meta}</div>
+                  </div>
+                  <div className="flex shrink-0 flex-col gap-2 sm:items-end">
+                    <StatusPill status={pill.status} text={pill.text} />
+                    <button
+                      type="button"
+                      disabled={syncing}
+                      onClick={() => void onSync(c.id)}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-60 sm:justify-end"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                      {syncing ? "Синхронизация…" : "Синхронизировать"}
+                    </button>
+                    <Link
+                      href={`/app/yandex-direct-data?connectionId=${encodeURIComponent(c.id)}`}
+                      className="text-center text-xs font-medium text-blue-600 hover:text-blue-700 sm:text-right"
+                    >
+                      Открыть выгруженные данные →
+                    </Link>
+                    <button
+                      type="button"
+                      disabled={syncing}
+                      onClick={() => void onDisconnect(c.id)}
+                      className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium hover:bg-neutral-50 disabled:opacity-60"
+                    >
+                      Отключить этот аккаунт
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            <a
+              href={withBasePathResolved("/api/yandex-direct/authorize?intent=add")}
+              className="inline-flex w-full items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-800 hover:bg-neutral-50 sm:w-auto"
+            >
+              + Подключить ещё аккаунт (другая почта)
+            </a>
+          </div>
+        ) : null}
       </div>
     </div>
   );

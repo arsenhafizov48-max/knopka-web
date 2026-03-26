@@ -174,15 +174,17 @@ async function pullStructure(token: string, clientLogin: string | null) {
 
 export async function syncYandexDirectStructure(
   admin: SupabaseClient,
-  userId: string
+  userId: string,
+  connectionId: string
 ): Promise<{ ok: true; payload: YandexSnapshotPayloadV1 } | { ok: false; message: string }> {
   try {
-    const token = await ensureYandexDirectAccessToken(admin, userId);
+    const token = await ensureYandexDirectAccessToken(admin, userId, connectionId);
 
     const { data: oauthRow } = await admin
       .from("yandex_direct_oauth")
       .select("yandex_login, yandex_email")
       .eq("user_id", userId)
+      .eq("id", connectionId)
       .maybeSingle();
 
     const profile = await getYandexPassportProfile(token).catch(() => null);
@@ -190,7 +192,7 @@ export async function syncYandexDirectStructure(
       const patch: Record<string, string> = { updated_at: new Date().toISOString() };
       if (profile.login) patch.yandex_login = profile.login;
       if (profile.defaultEmail) patch.yandex_email = profile.defaultEmail;
-      await admin.from("yandex_direct_oauth").update(patch).eq("user_id", userId);
+      await admin.from("yandex_direct_oauth").update(patch).eq("id", connectionId).eq("user_id", userId);
     }
 
     type OauthRow = { yandex_login?: string | null; yandex_email?: string | null } | null;
@@ -212,7 +214,7 @@ export async function syncYandexDirectStructure(
       const syncedAt = new Date().toISOString();
       await admin.from("yandex_direct_snapshot").upsert(
         {
-          user_id: userId,
+          connection_id: connectionId,
           payload: {
             version: 1,
             syncedAt,
@@ -229,7 +231,7 @@ export async function syncYandexDirectStructure(
           error_message: message,
           synced_at: syncedAt,
         },
-        { onConflict: "user_id" }
+        { onConflict: "connection_id" }
       );
       return { ok: false, message };
     }
@@ -258,13 +260,13 @@ export async function syncYandexDirectStructure(
 
     const { error } = await admin.from("yandex_direct_snapshot").upsert(
       {
-        user_id: userId,
+        connection_id: connectionId,
         payload: payload as unknown as Record<string, unknown>,
         sync_status: rowStatus,
         error_message: rowError,
         synced_at: syncedAt,
       },
-      { onConflict: "user_id" }
+      { onConflict: "connection_id" }
     );
 
     if (error) {
@@ -277,13 +279,13 @@ export async function syncYandexDirectStructure(
     const syncedAt = new Date().toISOString();
     await admin.from("yandex_direct_snapshot").upsert(
       {
-        user_id: userId,
+        connection_id: connectionId,
         payload: { version: 1, syncedAt, error: message } as unknown as Record<string, unknown>,
         sync_status: "error",
         error_message: message,
         synced_at: syncedAt,
       },
-      { onConflict: "user_id" }
+      { onConflict: "connection_id" }
     );
     return { ok: false, message };
   }

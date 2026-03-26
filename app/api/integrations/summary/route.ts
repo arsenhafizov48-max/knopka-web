@@ -38,55 +38,57 @@ export async function GET() {
 
   const lines: string[] = [];
 
-  const { data: dirOauth } = await admin
+  const { data: dirOauthRows } = await admin
     .from("yandex_direct_oauth")
-    .select("expires_at, yandex_login, yandex_email")
-    .eq("user_id", user.id)
-    .maybeSingle();
+    .select("id, expires_at, yandex_login, yandex_email")
+    .eq("user_id", user.id);
 
-  const { data: dirSnap } = await admin
-    .from("yandex_direct_snapshot")
-    .select("synced_at, sync_status, error_message, payload")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (dirOauth) {
+  for (const dirOauth of dirOauthRows ?? []) {
+    const oid = (dirOauth as { id: string }).id;
     const acc =
       (dirOauth as { yandex_email?: string | null; yandex_login?: string | null }).yandex_email ||
       (dirOauth as { yandex_login?: string | null }).yandex_login ||
       "аккаунт";
+
+    const { data: dirSnap } = await admin
+      .from("yandex_direct_snapshot")
+      .select("synced_at, sync_status, error_message, payload")
+      .eq("connection_id", oid)
+      .maybeSingle();
+
     lines.push(
       `Яндекс Директ: подключён (${acc}). Статус выгрузки: ${dirSnap?.sync_status ?? "нет данных"}.`
     );
     if (dirSnap?.synced_at) {
-      lines.push(`Директ — последняя синхронизация структуры: ${dirSnap.synced_at}.`);
+      lines.push(`Директ (${acc}) — последняя синхронизация структуры: ${dirSnap.synced_at}.`);
     }
     if (dirSnap?.error_message && dirSnap.sync_status !== "ok") {
-      lines.push(`Директ — примечание: ${dirSnap.error_message}`);
+      lines.push(`Директ (${acc}) — примечание: ${dirSnap.error_message}`);
     }
     const p = dirSnap?.payload as { counts?: Record<string, number> } | null;
     if (p?.counts) {
       lines.push(
-        `Директ — в снимке: кампаний ${p.counts.campaigns ?? 0}, групп ${p.counts.adGroups ?? 0}, объявлений ${p.counts.ads ?? 0}, фраз ${p.counts.keywords ?? 0}.`
+        `Директ (${acc}) — в снимке: кампаний ${p.counts.campaigns ?? 0}, групп ${p.counts.adGroups ?? 0}, объявлений ${p.counts.ads ?? 0}, фраз ${p.counts.keywords ?? 0}.`
       );
     }
-  } else {
+  }
+
+  if (!dirOauthRows?.length) {
     lines.push("Яндекс Директ: не подключён.");
   }
 
-  const { data: ymOauth } = await admin
+  const { data: ymOauthRows } = await admin
     .from("yandex_metrika_oauth")
-    .select("expires_at, yandex_login, yandex_email")
-    .eq("user_id", user.id)
-    .maybeSingle();
+    .select("id, expires_at, yandex_login, yandex_email")
+    .eq("user_id", user.id);
 
   const { data: ymCounters } = await admin
     .from("yandex_metrika_counters")
-    .select("counter_id, site_name, sync_status, error_message, synced_at, payload")
+    .select("counter_id, site_name, sync_status, error_message, synced_at, payload, connection_id")
     .eq("user_id", user.id);
 
-  if (ymOauth) {
-    lines.push("Яндекс Метрика: OAuth подключён.");
+  if (ymOauthRows?.length) {
+    lines.push(`Яндекс Метрика: OAuth подключён (${ymOauthRows.length} аккаунт(ов)).`);
     if (!ymCounters?.length) {
       lines.push("Метрика: счётчики не добавлены — отчёты по сайту не выгружаются.");
     } else {
@@ -134,7 +136,10 @@ export async function GET() {
   return NextResponse.json({
     authenticated: true,
     blockForAi,
-    direct: { connected: !!dirOauth },
-    metrika: { connected: !!ymOauth, counters: ymCounters?.length ?? 0 },
+    direct: { connected: (dirOauthRows?.length ?? 0) > 0, connections: dirOauthRows?.length ?? 0 },
+    metrika: {
+      connected: (ymOauthRows?.length ?? 0) > 0,
+      counters: ymCounters?.length ?? 0,
+    },
   });
 }

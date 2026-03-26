@@ -35,15 +35,19 @@ type CounterRow = {
 
 type YandexAccount = { login: string | null; email: string | null };
 
+type Conn = {
+  id: string;
+  expiresAt: string | null;
+  yandexAccount: YandexAccount | null;
+  counters: CounterRow[];
+};
+
 type MetrikaState =
   | { kind: "loading" }
   | {
       kind: "ok";
-      connected: boolean;
-      expiresAt: string | null;
       serverError?: string;
-      yandexAccount: YandexAccount | null;
-      counters: CounterRow[];
+      connections: Conn[];
     }
   | { kind: "error"; message: string };
 
@@ -52,58 +56,46 @@ const ICON = {
   fallback: "Я",
 } as const;
 
+function accountLabel(ya: YandexAccount | null): string | null {
+  if (!ya) return null;
+  if (ya.email && ya.login) return `${ya.email} (@${ya.login})`;
+  if (ya.email) return ya.email;
+  if (ya.login) return `@${ya.login}`;
+  return null;
+}
+
 export function YandexMetrikaIntegrationRow() {
   const [st, setSt] = useState<MetrikaState>({ kind: "loading" });
   const [flash, setFlash] = useState<{ text: string; kind: "ok" | "err" | "warn" } | null>(null);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [counterDraft, setCounterDraft] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [counterDrafts, setCounterDrafts] = useState<Record<string, string>>({});
+  const [addingFor, setAddingFor] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     setSt({ kind: "loading" });
     fetch(resolveSameOriginApiUrl("/api/yandex-metrika/status"), { credentials: "include" })
       .then(async (res) => {
         const j = (await res.json()) as {
-          connected?: boolean;
           authenticated?: boolean;
-          expiresAt?: string | null;
           error?: string;
-          yandexAccount?: YandexAccount | null;
-          counters?: CounterRow[];
+          connections?: Conn[];
         };
         if (!res.ok) {
           setSt({
             kind: "ok",
-            connected: false,
-            expiresAt: null,
             serverError: j.error || `HTTP ${res.status}`,
-            yandexAccount: null,
-            counters: [],
+            connections: [],
           });
           return;
         }
         if (!j.authenticated) {
-          setSt({
-            kind: "ok",
-            connected: false,
-            expiresAt: null,
-            yandexAccount: null,
-            counters: [],
-          });
+          setSt({ kind: "ok", connections: [] });
           return;
         }
-        const ya = j.yandexAccount;
         setSt({
           kind: "ok",
-          connected: !!j.connected,
-          expiresAt: j.expiresAt ?? null,
           serverError: j.error,
-          yandexAccount:
-            ya && (ya.email || ya.login)
-              ? { login: ya.login ?? null, email: ya.email ?? null }
-              : null,
-          counters: Array.isArray(j.counters) ? j.counters : [],
+          connections: Array.isArray(j.connections) ? j.connections : [],
         });
       })
       .catch((e: unknown) => {
@@ -146,12 +138,14 @@ export function YandexMetrikaIntegrationRow() {
     return () => window.clearTimeout(t);
   }, [flash]);
 
-  const onSync = async () => {
-    setSyncing(true);
+  const onSync = async (connectionId: string) => {
+    setBusyId(connectionId);
     try {
       const res = await fetch(resolveSameOriginApiUrl("/api/yandex-metrika/sync"), {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId }),
       });
       const j = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -174,42 +168,45 @@ export function YandexMetrikaIntegrationRow() {
       }
       refresh();
     } finally {
-      setSyncing(false);
+      setBusyId(null);
     }
   };
 
-  const onDisconnect = async () => {
-    setDisconnecting(true);
+  const onDisconnect = async (connectionId: string) => {
+    setBusyId(connectionId);
     try {
       const res = await fetch(resolveSameOriginApiUrl("/api/yandex-metrika/disconnect"), {
         method: "POST",
         credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connectionId }),
       });
       const j = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
         setFlash({ text: j.error || "Не удалось отключить", kind: "err" });
         return;
       }
-      setFlash({ text: "Яндекс Метрика отключена.", kind: "ok" });
+      setFlash({ text: "Подключение Метрики отключено.", kind: "ok" });
       refresh();
     } finally {
-      setDisconnecting(false);
+      setBusyId(null);
     }
   };
 
-  const onAddCounter = async () => {
-    const n = Number(counterDraft.replace(/\s/g, ""));
+  const onAddCounter = async (connectionId: string) => {
+    const draft = (counterDrafts[connectionId] ?? "").replace(/\s/g, "");
+    const n = Number(draft);
     if (!Number.isFinite(n) || n <= 0) {
       setFlash({ text: "Введите номер счётчика (цифры).", kind: "err" });
       return;
     }
-    setAdding(true);
+    setAddingFor(connectionId);
     try {
       const res = await fetch(resolveSameOriginApiUrl("/api/yandex-metrika/counters"), {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ counterId: n }),
+        body: JSON.stringify({ counterId: n, connectionId }),
       });
       const j = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!res.ok) {
@@ -218,13 +215,13 @@ export function YandexMetrikaIntegrationRow() {
       }
       if (j.ok) {
         setFlash({ text: "Счётчик добавлен, данные выгружены.", kind: "ok" });
-        setCounterDraft("");
+        setCounterDrafts((prev) => ({ ...prev, [connectionId]: "" }));
       } else {
         setFlash({ text: j.error || "Не удалось добавить счётчик", kind: "err" });
       }
       refresh();
     } finally {
-      setAdding(false);
+      setAddingFor(null);
     }
   };
 
@@ -241,64 +238,31 @@ export function YandexMetrikaIntegrationRow() {
     refresh();
   };
 
-  let pill: { status: Status; text: string };
-  let meta: string;
-  let accountLine: string | null = null;
+  let topPill: { status: Status; text: string } = { status: "manual", text: "Проверка…" };
+  let topMeta = "";
 
   if (st.kind === "loading") {
-    pill = { status: "manual", text: "Проверка…" };
-    meta = "Запрашиваем статус подключения…";
+    topPill = { status: "manual", text: "Проверка…" };
+    topMeta = "Запрашиваем статус подключения…";
   } else if (st.kind === "error") {
-    pill = { status: "disconnected", text: "Ошибка" };
-    meta = st.message;
+    topPill = { status: "disconnected", text: "Ошибка" };
+    topMeta = st.message;
   } else if (st.serverError === "service_role_missing") {
-    pill = { status: "partial", text: "Сервер" };
-    meta = "Задайте SUPABASE_SERVICE_ROLE_KEY на Vercel — иначе токен не сохранить.";
-  } else if (!st.connected) {
-    pill = { status: "disconnected", text: "Не подключено" };
-    meta = "OAuth: доступ к API Метрики (чтение отчётов).";
+    topPill = { status: "partial", text: "Сервер" };
+    topMeta = "Задайте SUPABASE_SERVICE_ROLE_KEY на Vercel — иначе токен не сохранить.";
+  } else if (st.connections.length === 0) {
+    topPill = { status: "disconnected", text: "Не подключено" };
+    topMeta = "OAuth: доступ к API Метрики (чтение отчётов).";
   } else {
-    const ya = st.yandexAccount;
-    if (ya) {
-      if (ya.email && ya.login) {
-        accountLine = `${ya.email} (@${ya.login})`;
-      } else if (ya.email) {
-        accountLine = ya.email;
-      } else if (ya.login) {
-        accountLine = `@${ya.login}`;
-      }
-    }
-    const hasCounters = st.counters.length > 0;
-    const anyErr = st.counters.some((c) => c.sync_status === "error");
-    const anyPartial = st.counters.some((c) => c.sync_status && c.sync_status !== "ok");
-    pill = !hasCounters
-      ? { status: "partial", text: "Нет счётчика" }
-      : anyErr
-        ? { status: "partial", text: "Есть ошибки" }
-        : anyPartial
-          ? { status: "partial", text: "Частично" }
+    const totalCounters = st.connections.reduce((s, c) => s + c.counters.length, 0);
+    const anyErr = st.connections.some((c) => c.counters.some((x) => x.sync_status === "error"));
+    topPill =
+      totalCounters === 0
+        ? { status: "partial", text: "Нет счётчика" }
+        : anyErr
+          ? { status: "partial", text: "Есть ошибки" }
           : { status: "connected", text: "Подключено" };
-
-    const tokenLine = st.expiresAt
-      ? `Токен до ${new Date(st.expiresAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}.`
-      : "Аккаунт привязан.";
-
-    let countersLine = " Добавьте номер счётчика — без него отчёты не выгрузятся.";
-    if (hasCounters) {
-      countersLine = st.counters
-        .map((c) => {
-          const t = c.synced_at
-            ? new Date(c.synced_at).toLocaleString("ru-RU", {
-                dateStyle: "short",
-                timeStyle: "short",
-              })
-            : "—";
-          const err = c.error_message ? ` ошибка: ${c.error_message}` : "";
-          return `Счётчик ${c.counter_id} (${c.site_name ?? "сайт"}) — выгрузка ${t}.${err}`;
-        })
-        .join(" ");
-    }
-    meta = `${tokenLine} ${countersLine}`;
+    topMeta = `${st.connections.length} OAuth-аккаунт(ов), ${totalCounters} счётчик(ов).`;
   }
 
   return (
@@ -318,109 +282,141 @@ export function YandexMetrikaIntegrationRow() {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 rounded-xl border border-neutral-200 bg-white px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <div
-            className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border text-sm font-semibold ${ICON.tint}`}
-            title="Яндекс"
-          >
-            {ICON.fallback}
-          </div>
-
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="font-medium">Яндекс Метрика</div>
-              <div className="text-xs text-neutral-500">Аналитика сайта</div>
+      <div className="rounded-xl border border-neutral-200 bg-white px-3 py-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-start gap-3">
+            <div
+              className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border text-sm font-semibold ${ICON.tint}`}
+              title="Яндекс"
+            >
+              {ICON.fallback}
             </div>
-            {st.kind === "ok" && st.connected && accountLine ? (
-              <div className="mt-0.5 text-xs text-neutral-800">
-                Подключён аккаунт: <span className="font-medium">{accountLine}</span>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="font-medium">Яндекс Метрика</div>
+                <div className="text-xs text-neutral-500">Аналитика сайта</div>
               </div>
+              <div className="mt-1 text-xs text-neutral-500">{topMeta}</div>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+            <StatusPill status={topPill.status} text={topPill.text} />
+            {st.kind === "ok" && st.serverError !== "service_role_missing" && st.connections.length === 0 ? (
+              <a
+                href={withBasePathResolved("/api/yandex-metrika/authorize")}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 sm:justify-end"
+              >
+                Подключить <ArrowUpRight className="h-3.5 w-3.5" />
+              </a>
             ) : null}
-            <div className="mt-1 text-xs text-neutral-500">{meta}</div>
+          </div>
+        </div>
 
-            {st.kind === "ok" && st.connected ? (
-              <div className="mt-2 flex flex-wrap items-end gap-2">
-                <div>
-                  <label className="sr-only" htmlFor="ym-counter-id">
-                    Номер счётчика
-                  </label>
-                  <input
-                    id="ym-counter-id"
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="Номер счётчика"
-                    value={counterDraft}
-                    onChange={(e) => setCounterDraft(e.target.value)}
-                    className="w-40 rounded-lg border border-neutral-200 px-2 py-1.5 text-xs"
-                  />
-                </div>
-                <button
-                  type="button"
-                  disabled={adding}
-                  onClick={() => void onAddCounter()}
-                  className="rounded-lg border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-xs font-medium hover:bg-neutral-100 disabled:opacity-60"
+        {st.kind === "ok" && st.connections.length > 0 ? (
+          <div className="mt-4 space-y-3 border-t border-neutral-100 pt-3">
+            {st.connections.map((c) => {
+              const acc = accountLabel(c.yandexAccount);
+              const syncing = busyId === c.id;
+              const adding = addingFor === c.id;
+              return (
+                <div
+                  key={c.id}
+                  className="space-y-2 rounded-lg border border-neutral-100 bg-neutral-50/50 px-3 py-2"
                 >
-                  {adding ? "Добавляем…" : "Добавить счётчик"}
-                </button>
-              </div>
-            ) : null}
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      {acc ? (
+                        <div className="text-xs font-medium text-neutral-800">{acc}</div>
+                      ) : (
+                        <div className="text-xs text-neutral-600">Аккаунт Яндекса</div>
+                      )}
+                      <div className="text-xs text-neutral-500">
+                        Токен до{" "}
+                        {c.expiresAt
+                          ? new Date(c.expiresAt).toLocaleString("ru-RU", {
+                              dateStyle: "short",
+                              timeStyle: "short",
+                            })
+                          : "—"}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2 sm:items-end">
+                      <button
+                        type="button"
+                        disabled={syncing || c.counters.length === 0}
+                        onClick={() => void onSync(c.id)}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-60 sm:justify-end"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
+                        {syncing ? "Синхронизация…" : "Синхронизировать"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={syncing}
+                        onClick={() => void onDisconnect(c.id)}
+                        className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium hover:bg-neutral-50 disabled:opacity-60"
+                      >
+                        Отключить этот аккаунт
+                      </button>
+                    </div>
+                  </div>
 
-            {st.kind === "ok" && st.connected && st.counters.length > 0 ? (
-              <ul className="mt-2 space-y-1 text-xs text-neutral-600">
-                {st.counters.map((c) => (
-                  <li key={c.id} className="flex flex-wrap items-center gap-2">
-                    <span>
-                      #{c.counter_id} {c.site_name ? `· ${c.site_name}` : ""}
-                    </span>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div>
+                      <label className="sr-only" htmlFor={`ym-counter-${c.id}`}>
+                        Номер счётчика
+                      </label>
+                      <input
+                        id={`ym-counter-${c.id}`}
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="Номер счётчика"
+                        value={counterDrafts[c.id] ?? ""}
+                        onChange={(e) =>
+                          setCounterDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))
+                        }
+                        className="w-40 rounded-lg border border-neutral-200 px-2 py-1.5 text-xs"
+                      />
+                    </div>
                     <button
                       type="button"
-                      onClick={() => void onRemoveCounter(c.id)}
-                      className="text-rose-600 hover:underline"
+                      disabled={adding}
+                      onClick={() => void onAddCounter(c.id)}
+                      className="rounded-lg border border-neutral-200 bg-white px-2 py-1.5 text-xs font-medium hover:bg-neutral-100 disabled:opacity-60"
                     >
-                      Убрать
+                      {adding ? "Добавляем…" : "Добавить счётчик"}
                     </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        </div>
+                  </div>
 
-        <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-          <StatusPill status={pill.status} text={pill.text} />
-
-          {st.kind === "ok" && st.serverError !== "service_role_missing" && !st.connected ? (
+                  {c.counters.length > 0 ? (
+                    <ul className="space-y-1 text-xs text-neutral-600">
+                      {c.counters.map((x) => (
+                        <li key={x.id} className="flex flex-wrap items-center gap-2">
+                          <span>
+                            #{x.counter_id} {x.site_name ? `· ${x.site_name}` : ""}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => void onRemoveCounter(x.id)}
+                            className="text-rose-600 hover:underline"
+                          >
+                            Убрать
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              );
+            })}
             <a
-              href={withBasePathResolved("/api/yandex-metrika/authorize")}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 sm:justify-end"
+              href={withBasePathResolved("/api/yandex-metrika/authorize?intent=add")}
+              className="inline-flex w-full items-center justify-center rounded-xl border border-dashed border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-800 hover:bg-neutral-50 sm:w-auto"
             >
-              Подключить <ArrowUpRight className="h-3.5 w-3.5" />
+              + Подключить ещё аккаунт (другая почта)
             </a>
-          ) : null}
-
-          {st.kind === "ok" && st.connected ? (
-            <>
-              <button
-                type="button"
-                disabled={syncing || st.counters.length === 0}
-                onClick={() => void onSync()}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-neutral-900 px-3 py-2 text-xs font-medium text-white hover:bg-neutral-800 disabled:opacity-60 sm:justify-end"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "Синхронизация…" : "Синхронизировать"}
-              </button>
-              <button
-                type="button"
-                disabled={disconnecting}
-                onClick={() => void onDisconnect()}
-                className="rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium hover:bg-neutral-50 disabled:opacity-60"
-              >
-                {disconnecting ? "Отключаем…" : "Отключить"}
-              </button>
-            </>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

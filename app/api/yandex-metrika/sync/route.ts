@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 
 import { createSupabaseAuthRouteClient } from "@/app/lib/supabaseAuthRoute";
 import { getSupabaseServiceRoleClient } from "@/app/lib/supabaseServiceRole";
-import { syncAllYandexMetrikaCountersForUser } from "@/app/lib/yandexMetrikaSync";
+import {
+  syncAllYandexMetrikaCountersForUser,
+  syncYandexMetrikaCountersForConnection,
+} from "@/app/lib/yandexMetrikaSync";
 
 async function syncAllUsersCron() {
   const admin = getSupabaseServiceRoleClient();
@@ -11,9 +14,12 @@ async function syncAllUsersCron() {
     .select("user_id");
   if (error) throw new Error(error.message);
 
+  const seen = new Set<string>();
   const results: Array<{ user_id: string; counters: unknown }> = [];
   for (const row of oauthRows ?? []) {
     const uid = row.user_id as string;
+    if (seen.has(uid)) continue;
+    seen.add(uid);
     const counters = await syncAllYandexMetrikaCountersForUser(admin, uid);
     results.push({ user_id: uid, counters });
   }
@@ -59,7 +65,29 @@ async function runSync(request: Request) {
     return NextResponse.json({ error: "service_role_missing" }, { status: 503 });
   }
 
-  const results = await syncAllYandexMetrikaCountersForUser(admin, user.id);
+  let body: { connectionId?: string } = {};
+  try {
+    body = (await request.json()) as { connectionId?: string };
+  } catch {
+    /* empty */
+  }
+  const cid = typeof body.connectionId === "string" ? body.connectionId.trim() : "";
+
+  let results;
+  if (cid) {
+    const { data: own } = await admin
+      .from("yandex_metrika_oauth")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("id", cid)
+      .maybeSingle();
+    if (!own) {
+      return NextResponse.json({ error: "connection_not_found" }, { status: 404 });
+    }
+    results = await syncYandexMetrikaCountersForConnection(admin, user.id, cid);
+  } else {
+    results = await syncAllYandexMetrikaCountersForUser(admin, user.id);
+  }
   if (results.length === 0) {
     return NextResponse.json({
       ok: true,

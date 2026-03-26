@@ -8,16 +8,18 @@ type OauthRow = {
 
 export async function ensureYandexDirectAccessToken(
   admin: SupabaseClient,
-  userId: string
+  userId: string,
+  connectionId: string
 ): Promise<string> {
   const { data: row, error } = await admin
     .from("yandex_direct_oauth")
     .select("access_token, refresh_token, expires_at")
     .eq("user_id", userId)
+    .eq("id", connectionId)
     .maybeSingle();
 
   if (error || !row) {
-    throw new Error("Яндекс Директ не подключён");
+    throw new Error("Яндекс Директ: подключение не найдено");
   }
 
   const r = row as OauthRow;
@@ -87,7 +89,8 @@ export async function ensureYandexDirectAccessToken(
       expires_at: expiresAt,
       updated_at: now,
     })
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("id", connectionId);
 
   if (upErr) throw new Error(upErr.message);
 

@@ -8,12 +8,14 @@ type OauthRow = {
 
 export async function ensureYandexMetrikaAccessToken(
   admin: SupabaseClient,
-  userId: string
+  userId: string,
+  connectionId: string
 ): Promise<string> {
   const { data: row, error } = await admin
     .from("yandex_metrika_oauth")
     .select("access_token, refresh_token, expires_at")
     .eq("user_id", userId)
+    .eq("id", connectionId)
     .maybeSingle();
 
   if (error || !row) {
@@ -87,7 +89,8 @@ export async function ensureYandexMetrikaAccessToken(
       expires_at: expiresAt,
       updated_at: now,
     })
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("id", connectionId);
 
   if (upErr) throw new Error(upErr.message);
 

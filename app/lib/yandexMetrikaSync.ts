@@ -164,11 +164,9 @@ export async function syncYandexMetrikaCounter(
   counterRowId: string
 ): Promise<{ ok: true; payload: MetrikaSnapshotPayloadV1 } | { ok: false; message: string }> {
   try {
-    const token = await ensureYandexMetrikaAccessToken(admin, userId);
-
     const { data: row, error } = await admin
       .from("yandex_metrika_counters")
-      .select("id, counter_id")
+      .select("id, counter_id, connection_id")
       .eq("id", counterRowId)
       .eq("user_id", userId)
       .maybeSingle();
@@ -176,6 +174,9 @@ export async function syncYandexMetrikaCounter(
     if (error || !row) {
       return { ok: false, message: "Счётчик не найден" };
     }
+
+    const connectionId = (row as { connection_id: string }).connection_id;
+    const token = await ensureYandexMetrikaAccessToken(admin, userId, connectionId);
 
     const counterId = Number((row as { counter_id: number }).counter_id);
     const { date1, date2 } = rangeLastDays(30);
@@ -238,6 +239,30 @@ export async function syncYandexMetrikaCounter(
     }
     return { ok: false, message };
   }
+}
+
+export async function syncYandexMetrikaCountersForConnection(
+  admin: SupabaseClient,
+  userId: string,
+  connectionId: string
+): Promise<Array<{ counterId: string; ok: boolean; error?: string }>> {
+  const { data: rows } = await admin
+    .from("yandex_metrika_counters")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("connection_id", connectionId);
+
+  const results: Array<{ counterId: string; ok: boolean; error?: string }> = [];
+  for (const r of rows ?? []) {
+    const id = (r as { id: string }).id;
+    const res = await syncYandexMetrikaCounter(admin, userId, id);
+    if (res.ok) {
+      results.push({ counterId: id, ok: true });
+    } else {
+      results.push({ counterId: id, ok: false, error: res.message });
+    }
+  }
+  return results;
 }
 
 export async function syncAllYandexMetrikaCountersForUser(

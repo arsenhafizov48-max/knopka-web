@@ -1,14 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
 
 type CampaignRow = { Id?: number; Name?: string; State?: string; Status?: string; Type?: string };
 
-export default function YandexDirectDataPage() {
+function YandexDirectDataInner() {
+  const searchParams = useSearchParams();
+  const connectionId = searchParams.get("connectionId")?.trim() ?? "";
+
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
@@ -22,7 +26,8 @@ export default function YandexDirectDataPage() {
 
   useEffect(() => {
     let alive = true;
-    fetch(resolveSameOriginApiUrl("/api/yandex-direct/snapshot"), { credentials: "include" })
+    const qs = connectionId ? `?connectionId=${encodeURIComponent(connectionId)}` : "";
+    fetch(resolveSameOriginApiUrl(`/api/yandex-direct/snapshot${qs}`), { credentials: "include" })
       .then(async (res) => {
         const j = (await res.json()) as {
           error?: string;
@@ -53,7 +58,7 @@ export default function YandexDirectDataPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [connectionId]);
 
   return (
     <div className="mx-auto max-w-[1100px] space-y-6 px-6 py-6">
@@ -67,7 +72,7 @@ export default function YandexDirectDataPage() {
         <h1 className="mt-4 text-2xl font-semibold">Яндекс Директ — выгруженная структура</h1>
         <p className="mt-1 text-sm text-neutral-600">
           Данные подтягиваются из API раз в сутки (cron) или по кнопке «Синхронизировать». Здесь — кампании;
-          полный JSON содержит группы, объявления и ключевые фразы (для ИИ и отчётов).
+          полный JSON содержит группы, объявления и ключевые фразы (для КНОПКА и отчётов).
         </p>
       </div>
 
@@ -125,5 +130,17 @@ export default function YandexDirectDataPage() {
         </>
       )}
     </div>
+  );
+}
+
+export default function YandexDirectDataPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto max-w-[1100px] px-6 py-6 text-sm text-neutral-600">Загрузка…</div>
+      }
+    >
+      <YandexDirectDataInner />
+    </Suspense>
   );
 }

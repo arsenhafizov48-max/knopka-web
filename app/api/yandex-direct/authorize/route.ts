@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { createSupabaseAuthRouteClient } from "@/app/lib/supabaseAuthRoute";
 import {
   getYandexDirectRedirectUri,
+  YANDEX_DIRECT_OAUTH_INTENT_COOKIE,
   YANDEX_DIRECT_OAUTH_STATE_COOKIE,
   YANDEX_DIRECT_SCOPE,
 } from "@/app/lib/yandexDirectOAuth";
@@ -34,6 +35,15 @@ export async function GET(request: Request) {
   const state = randomBytes(16).toString("hex");
   const cookieStore = await cookies();
   cookieStore.set(YANDEX_DIRECT_OAUTH_STATE_COOKIE, state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 600,
+    path: "/",
+  });
+
+  const intent = url.searchParams.get("intent") === "add" ? "add" : "default";
+  cookieStore.set(YANDEX_DIRECT_OAUTH_INTENT_COOKIE, intent, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
