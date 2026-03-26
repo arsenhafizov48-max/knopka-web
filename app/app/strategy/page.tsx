@@ -2,42 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, FileDown, FileText, RefreshCw, Sparkles } from "lucide-react";
+import { AlertCircle, FileDown, FileText } from "lucide-react";
 
 import { loadProjectFact, type ProjectFact } from "@/app/app/lib/projectFact";
-import { buildStrategyDocument } from "@/app/app/lib/strategy/buildFromFact";
 import { getStrategyGaps } from "@/app/app/lib/strategy/gaps";
-import {
-  clearStrategy,
-  loadStrategy,
-  saveStrategy,
-} from "@/app/app/lib/strategy/storage";
+import { clearStrategy, loadStrategy } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
 import { StrategyCompetitorAnalysis } from "@/app/app/components/StrategyCompetitorAnalysis";
 import { StrategyGigaChat } from "@/app/app/components/StrategyGigaChat";
 import { StrategyWordstatDemand } from "@/app/app/components/StrategyWordstatDemand";
 import { downloadStrategyDocumentPdf } from "@/app/app/lib/strategy/strategyPdfExport";
-import { resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
-
-type StrategyAreaTab = "demand" | "competitors";
-
-async function fetchIntegrationsBlock(): Promise<string> {
-  try {
-    const res = await fetch(resolveSameOriginApiUrl("/api/integrations/summary"), {
-      credentials: "same-origin",
-    });
-    const j = (await res.json()) as { blockForAi?: string };
-    return typeof j.blockForAi === "string" ? j.blockForAi : "";
-  } catch {
-    return "";
-  }
-}
 
 export default function StrategyPage() {
   const [fact, setFact] = useState<ProjectFact | null>(null);
   const [doc, setDoc] = useState<StrategyDocument | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [areaTab, setAreaTab] = useState<StrategyAreaTab>("demand");
   const [pdfBusy, setPdfBusy] = useState(false);
 
   const refresh = useCallback(() => {
@@ -58,32 +36,6 @@ export default function StrategyPage() {
   }, [refresh]);
 
   const gaps = useMemo(() => (fact ? getStrategyGaps(fact) : { ok: false, items: [] }), [fact]);
-
-  const onGenerate = async () => {
-    if (!fact || !gaps.ok) return;
-    setBusy(true);
-    try {
-      const integrationsBlock = await fetchIntegrationsBlock();
-      const next = buildStrategyDocument(fact, { integrationsBlock });
-      saveStrategy(next);
-      setDoc(next);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const onRegenerate = async () => {
-    if (!fact || !gaps.ok) return;
-    setBusy(true);
-    try {
-      const integrationsBlock = await fetchIntegrationsBlock();
-      const next = buildStrategyDocument(fact, { integrationsBlock });
-      saveStrategy(next);
-      setDoc(next);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const onClear = () => {
     clearStrategy();
@@ -107,92 +59,24 @@ export default function StrategyPage() {
             потом формируем структуру.
           </p>
         </div>
-        <Link
-          href="/app/fact"
-          className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-900 hover:bg-neutral-50"
-        >
-          <FileText className="h-4 w-4" />
-          Фактура бизнеса
-        </Link>
-      </div>
-
-      <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50/80 to-white p-5 ring-1 ring-violet-100">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
-            <Sparkles className="h-5 w-5" />
-          </div>
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-neutral-900">
-              Создать стратегию для бизнеса
-            </div>
-            <p className="mt-1 text-sm text-neutral-600">
-              Нажмите кнопку ниже, когда все обязательные поля заполнены. Документ можно
-              пересобрать после обновления фактуры.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={!gaps.ok || busy}
-                onClick={doc ? onRegenerate : onGenerate}
-                className="inline-flex items-center gap-2 rounded-2xl bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
-                {doc ? "Пересобрать из фактуры" : "Сформировать стратегию"}
-              </button>
-              {doc ? (
-                <button
-                  type="button"
-                  onClick={onClear}
-                  className="rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-                >
-                  Удалить документ
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex flex-wrap gap-2 rounded-2xl border border-neutral-200 bg-neutral-50/80 p-1">
-          <button
-            type="button"
-            onClick={() => setAreaTab("demand")}
-            className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
-              areaTab === "demand"
-                ? "bg-white text-neutral-900 shadow-sm"
-                : "text-neutral-600 hover:text-neutral-900"
-            }`}
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/app/fact"
+            className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-900 hover:bg-neutral-50"
           >
-            Спрос
-          </button>
-          <button
-            type="button"
-            onClick={() => setAreaTab("competitors")}
-            className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
-              areaTab === "competitors"
-                ? "bg-white text-neutral-900 shadow-sm"
-                : "text-neutral-600 hover:text-neutral-900"
-            }`}
-          >
-            Конкуренты
-          </button>
+            <FileText className="h-4 w-4" />
+            Фактура бизнеса
+          </Link>
           <Link
             href="/app/strategy/history"
-            className="ml-auto self-center pr-2 text-xs font-medium text-neutral-500 underline decoration-neutral-300 underline-offset-2 hover:text-neutral-800"
+            className="inline-flex shrink-0 items-center gap-2 rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
           >
             История анализов
           </Link>
         </div>
-
-        {areaTab === "demand" ? (
-          <StrategyWordstatDemand fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
-        ) : (
-          <StrategyCompetitorAnalysis fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
-        )}
       </div>
 
-      <StrategyGigaChat doc={doc} fact={fact} />
+      <StrategyGigaChat doc={doc} fact={fact} setDoc={setDoc} gapsOk={gaps.ok} />
 
       {!gaps.ok ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5">
@@ -238,6 +122,13 @@ export default function StrategyPage() {
             </span>
             <div className="flex flex-wrap items-center gap-3">
               <span>Фактура на момент сборки: {doc.factSnapshotUpdatedAt.slice(0, 10)}</span>
+              <button
+                type="button"
+                onClick={onClear}
+                className="rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+              >
+                Удалить документ
+              </button>
               <button
                 type="button"
                 disabled={pdfBusy}
@@ -359,10 +250,20 @@ export default function StrategyPage() {
         </div>
       ) : gaps.ok ? (
         <div className="rounded-2xl border border-dashed border-neutral-300 bg-neutral-50/50 p-8 text-center text-sm text-neutral-600">
-          Стратегия ещё не сформирована. Нажмите «Сформировать стратегию» — появится
-          структурированный документ из семи разделов.
+          Документ стратегии ещё не собран. В блоке чата выше нажмите «Собрать стратегию из фактуры» — появятся разделы
+          1–9; при необходимости затем запустите анализ спроса и конкурентов там же.
         </div>
       ) : null}
+
+      <details className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/50 p-4 text-sm text-neutral-600">
+        <summary className="cursor-pointer font-medium text-neutral-700">
+          Проверка API (отладка): отдельные формы Вордстата и конкурентов
+        </summary>
+        <div className="mt-4 space-y-4">
+          <StrategyWordstatDemand fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
+          <StrategyCompetitorAnalysis fact={fact} doc={doc} setDoc={setDoc} gapsOk={gaps.ok} />
+        </div>
+      </details>
     </div>
   );
 }

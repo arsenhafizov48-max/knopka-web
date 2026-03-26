@@ -2,6 +2,15 @@ import { NextResponse } from "next/server";
 
 import { getSupabaseServerClient } from "@/app/lib/supabaseServer";
 
+function isMissingTableError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    m.includes("schema cache") ||
+    m.includes("pgrst205") ||
+    (m.includes("could not find") && m.includes("strategy_competitor_runs"))
+  );
+}
+
 export async function GET(req: Request) {
   const supabase = await getSupabaseServerClient();
   const {
@@ -25,6 +34,14 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     if (error) {
+      if (isMissingTableError(error.message)) {
+        return NextResponse.json({
+          dbMissing: true,
+          warning:
+            "Таблица истории анализов ещё не создана в Supabase (выполните миграцию). Просмотр сохранённых запусков недоступен; новый анализ в стратегии работает.",
+          run: null,
+        });
+      }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     if (!data) {
@@ -53,6 +70,14 @@ export async function GET(req: Request) {
     .limit(80);
 
   if (error) {
+    if (isMissingTableError(error.message)) {
+      return NextResponse.json({
+        runs: [],
+        dbMissing: true,
+        warning:
+          "Таблица истории анализов ещё не создана в Supabase (выполните миграцию). Список пуст; анализ конкурентов в документе стратегии при этом работает.",
+      });
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

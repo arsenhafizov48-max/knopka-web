@@ -120,6 +120,8 @@ export default function StrategyHistoryDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [dbMissing, setDbMissing] = useState(false);
+  const [dbWarning, setDbWarning] = useState<string | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [payload, setPayload] = useState<CompetitorAnalysisPayload | null>(null);
   const [mapTab, setMapTab] = useState<"yandex" | "gis2">("yandex");
@@ -130,12 +132,16 @@ export default function StrategyHistoryDetailPage() {
     (async () => {
       setLoading(true);
       setErr(null);
+      setDbMissing(false);
+      setDbWarning(null);
       try {
         const url = resolveSameOriginApiUrl(`/api/strategy/competitor-runs?id=${encodeURIComponent(id)}`);
         const res = await fetch(url, { credentials: "same-origin" });
         const raw = await res.text();
         let data: {
           error?: string;
+          dbMissing?: boolean;
+          warning?: string;
           run?: {
             createdAt: string;
             sites: CompetitorSiteRow[];
@@ -151,6 +157,16 @@ export default function StrategyHistoryDetailPage() {
         }
         if (!res.ok) {
           if (!cancelled) setErr(data.error || `Ошибка ${res.status}`);
+          return;
+        }
+        if (data.dbMissing) {
+          if (!cancelled) {
+            setDbMissing(true);
+            setDbWarning(
+              data.warning ??
+                "Таблица истории в Supabase не создана. Сохранённые запуски недоступны; новый анализ в стратегии работает."
+            );
+          }
           return;
         }
         const run = data.run;
@@ -200,6 +216,15 @@ export default function StrategyHistoryDetailPage() {
         </div>
       ) : err ? (
         <p className="text-sm text-red-700">{err}</p>
+      ) : dbMissing ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
+          {dbWarning}
+          <span className="mt-2 block">
+            <Link href="/app/strategy" className="font-medium text-violet-700 underline underline-offset-2">
+              Вернуться к стратегии
+            </Link>
+          </span>
+        </div>
       ) : payload ? (
         <>
           <div>
@@ -285,11 +310,11 @@ export default function StrategyHistoryDetailPage() {
           </div>
 
           <p className="text-sm text-neutral-600">
-            Новый анализ с актуальной фактурой:{" "}
+            Новый анализ с актуальной фактурой — в чате на странице{" "}
             <Link href="/app/strategy" className="font-medium text-violet-700 underline underline-offset-2">
-              Стратегия → Конкуренты
-            </Link>
-            .
+              Стратегия
+            </Link>{" "}
+            (кнопка «Анализ конкурентов»).
           </p>
         </>
       ) : null}

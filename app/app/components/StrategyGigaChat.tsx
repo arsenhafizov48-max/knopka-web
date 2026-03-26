@@ -12,17 +12,44 @@ import { withBasePath, resolveSameOriginApiUrl } from "@/app/lib/publicBasePath"
 import { loadStrategyThread, saveStrategyThread } from "@/app/app/lib/gigachat/strategyThreadDb";
 import type { ProjectFact } from "@/app/app/lib/projectFact";
 import { formatProjectFactForAi } from "@/app/app/lib/gigachat/formatProjectFactForAi";
+import { applyCompetitorsToStrategy } from "@/app/app/lib/strategy/applyCompetitorsToStrategy";
+import { applyWordstatDemandSection } from "@/app/app/lib/strategy/applyWordstatDemand";
+import { buildStrategyDocument } from "@/app/app/lib/strategy/buildFromFact";
+import type { CompetitorAnalysisPayload } from "@/app/app/lib/strategy/competitorTypes";
+import { saveStrategy } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
 
 const DEV_SKIP_AUTH = process.env.NEXT_PUBLIC_KNOPKA_DEV_SKIP_AUTH === "1";
 
 /** Пока ждём ответ API — смена подписей, чтобы было видно прогресс (как этапы в Cursor). */
-const PROGRESS_STEPS = [
+const GIGACHAT_PROGRESS_STEPS = [
   "Собираю фактуру бизнеса из кабинета…",
   "Подключаю текст стратегии (включая блок «Рынок», если вы уже запускали Вордстат)…",
   "Отправляю запрос в GigaChat…",
   "Жду ответ модели…",
 ] as const;
+
+const STRATEGY_JOB_STEPS = [
+  "Подтягиваю сводку интеграций (Метрика/Директ)…",
+  "Собираю документ стратегии из фактуры…",
+  "Сохраняю в браузер…",
+] as const;
+
+const WORDSTAT_JOB_STEPS = [
+  "Подбираю фразы и регион Вордстата…",
+  "Запрашиваю Яндекс.Вордстат…",
+  "Считаю спрос и второй проход GigaChat…",
+  "Записываю раздел «3. Анализ спроса»…",
+] as const;
+
+const COMPETITOR_JOB_STEPS = [
+  "Читаю фактуру бизнеса (ниша, гео, услуги)…",
+  "Собираю промпт для GigaChat (сайты, карты)…",
+  "Отправляю запрос на сервер…",
+  "Жду ответ модели (таблицы «Сайты», «Яндекс.Карты», «2ГИС»)…",
+] as const;
+
+type StrategyJobKind = "strategy" | "wordstat" | "competitor";
 
 const FETCH_TIMEOUT_MS = 120_000;
 
@@ -88,13 +115,18 @@ function AssistantBubble({ content }: { content: string }) {
 export function StrategyGigaChat({
   doc,
   fact,
+  setDoc,
+  gapsOk,
 }: {
   doc: StrategyDocument | null;
   fact: ProjectFact | null;
+  setDoc: (d: StrategyDocument) => void;
+  gapsOk: boolean;
 }) {
   const [input, setInput] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [jobBusy, setJobBusy] = useState<StrategyJobKind | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
@@ -111,17 +143,37 @@ export function StrategyGigaChat({
     setMounted(true);
   }, []);
 
+  const activeProgressSteps = useMemo(() => {
+    if (chatLoading) return GIGACHAT_PROGRESS_STEPS;
+    if (jobBusy === "strategy") return STRATEGY_JOB_STEPS;
+    if (jobBusy === "wordstat") return WORDSTAT_JOB_STEPS;
+    if (jobBusy === "competitor") return COMPETITOR_JOB_STEPS;
+    return [] as readonly string[];
+  }, [chatLoading, jobBusy]);
+
+  const progressTitle = chatLoading
+    ? "Идёт ответ GigaChat…"
+    : jobBusy === "strategy"
+      ? "Собираю стратегию из фактуры…"
+      : jobBusy === "wordstat"
+        ? "Анализ спроса (Вордстат)…"
+        : jobBusy === "competitor"
+          ? "Анализ конкурентов…"
+          : "";
+
+  const busy = chatLoading || jobBusy !== null;
+
   useEffect(() => {
-    if (!loading) {
+    if (!chatLoading && !jobBusy) {
       setProgressPhase(0);
       return;
     }
     setProgressPhase(0);
     const id = window.setInterval(() => {
-      setProgressPhase((p) => (p < PROGRESS_STEPS.length - 1 ? p + 1 : p));
+      setProgressPhase((p) => (p < activeProgressSteps.length - 1 ? p + 1 : p));
     }, 850);
     return () => window.clearInterval(id);
-  }, [loading]);
+  }, [chatLoading, jobBusy, activeProgressSteps.length]);
 
   useEffect(() => {
     if (DEV_SKIP_AUTH) return;
@@ -241,9 +293,179 @@ export function StrategyGigaChat({
     setPendingFiles((p) => p.filter((x) => x.id !== id));
   }, []);
 
+  const runStrategyJob = useCallback(async () => {
+    if (!fact || !gapsOk || chatLoading || jobBusy) return;
+    setJobBusy("strategy");
+    setError(null);
+    try {
+      const integrationsRes = await fetch(resolveSameOriginApiUrl("/api/integrations/summary"), {
+        credentials: "same-origin",
+      });
+      const j = (await integrationsRes.json()) as { blockForAi?: string };
+      const integrationsBlock = typeof j.blockForAi === "string" ? j.blockForAi : "";
+      const next = buildStrategyDocument(fact, { integrationsBlock });
+      saveStrategy(next);
+      setDoc(next);
+      window.dispatchEvent(new Event("knopka:strategyUpdated"));
+      setTurns((t) => [
+        ...t,
+        {
+          role: "assistant",
+          content:
+            "## Стратегия обновлена\n\nДокумент пересобран из фактуры и сводки интеграций. Разделы ниже на странице — откройте и при необходимости скачайте PDF.",
+        },
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка сборки стратегии");
+    } finally {
+      setJobBusy(null);
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
+    }
+  }, [fact, gapsOk, chatLoading, jobBusy, setDoc]);
+
+  const runWordstatJob = useCallback(async () => {
+    if (!fact || !gapsOk || chatLoading || jobBusy) return;
+    setJobBusy("wordstat");
+    setError(null);
+    try {
+      const apiUrl = resolveSameOriginApiUrl("/api/strategy/wordstat-demand");
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fact }),
+        credentials: "same-origin",
+      });
+      const rawText = await res.text();
+      let data: {
+        error?: string;
+        market?: {
+          paragraphs: string[];
+          bullets: string[];
+          tables?: { title: string; columns: string[]; rows: string[][] }[];
+        };
+        regionLabel?: string;
+        phrases?: { requested: number };
+        estimate?: { potentialRevenueRub: number | null };
+      };
+      try {
+        data = JSON.parse(rawText) as typeof data;
+      } catch {
+        const isHtml =
+          rawText.trimStart().startsWith("<!") || rawText.trimStart().toLowerCase().startsWith("<html");
+        if (res.status === 502 || res.status === 504) {
+          setError(
+            `Сервер не успел завершить запрос (код ${res.status}). Анализ спроса тяжёлый: Вордстат + два вызова GigaChat. Повторите запрос через минуту.`
+          );
+        } else if (isHtml) {
+          setError(
+            `Ответ не JSON (код ${res.status}), запрос: ${apiUrl}. Если сайт с префиксом пути — задайте NEXT_PUBLIC_BASE_PATH.`
+          );
+        } else {
+          setError(rawText.slice(0, 220));
+        }
+        return;
+      }
+      if (!res.ok) {
+        setError(data.error || `Ошибка ${res.status}`);
+        return;
+      }
+      if (!data.market?.paragraphs?.length) {
+        setError("Пустой ответ сервера");
+        return;
+      }
+      const base = doc ?? buildStrategyDocument(fact);
+      const next = applyWordstatDemandSection(base, {
+        paragraphs: data.market.paragraphs,
+        bullets: data.market.bullets ?? [],
+        tables: data.market.tables,
+      });
+      saveStrategy(next);
+      setDoc(next);
+      window.dispatchEvent(new Event("knopka:strategyUpdated"));
+      const rev =
+        data.estimate?.potentialRevenueRub != null
+          ? ` Оценка выручки/мес: ${new Intl.NumberFormat("ru-RU").format(data.estimate.potentialRevenueRub)} ₽.`
+          : "";
+      const detail = `${data.regionLabel ?? "гео"}, ${data.phrases?.requested ?? "—"} фраз в одном запросе Вордстата.${rev}`;
+      setTurns((t) => [
+        ...t,
+        {
+          role: "assistant",
+          content: `## Готово: анализ спроса\n\nРаздел **«3. Анализ спроса»** обновлён данными Вордстата.\n\n${detail}`,
+        },
+      ]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Не удалось связаться с сервером");
+    } finally {
+      setJobBusy(null);
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
+    }
+  }, [fact, gapsOk, chatLoading, jobBusy, doc, setDoc]);
+
+  const runCompetitorJob = useCallback(async () => {
+    if (!fact || !gapsOk || chatLoading || jobBusy) return;
+    setJobBusy("competitor");
+    setError(null);
+    try {
+      const apiUrl = resolveSameOriginApiUrl("/api/strategy/competitor-analyze");
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fact }),
+        credentials: "same-origin",
+      });
+      const rawText = await res.text();
+      let json: {
+        error?: string;
+        warning?: string;
+        persisted?: boolean;
+        sites?: CompetitorAnalysisPayload["sites"];
+        yandexMaps?: CompetitorAnalysisPayload["yandexMaps"];
+        gis2?: CompetitorAnalysisPayload["gis2"];
+      };
+      try {
+        json = JSON.parse(rawText) as typeof json;
+      } catch {
+        setError(rawText.slice(0, 240));
+        return;
+      }
+      if (!res.ok) {
+        setError(json.error || `Ошибка ${res.status}`);
+        return;
+      }
+      if (!json.sites?.length && !json.yandexMaps?.length && !json.gis2?.length) {
+        setError("Пустой ответ модели");
+        return;
+      }
+      const payload: CompetitorAnalysisPayload = {
+        sites: json.sites ?? [],
+        yandexMaps: json.yandexMaps ?? [],
+        gis2: json.gis2 ?? [],
+      };
+      const base = doc ?? buildStrategyDocument(fact);
+      const next = applyCompetitorsToStrategy(base, payload);
+      saveStrategy(next);
+      setDoc(next);
+      window.dispatchEvent(new Event("knopka:strategyUpdated"));
+      let msg =
+        "## Готово: анализ конкурентов\n\nРаздел **«4. Анализ конкурентов»** обновлён таблицами «Сайты», «Яндекс.Карты», «2ГИС».";
+      if (json.persisted === false && json.warning) {
+        msg += `\n\n> ${json.warning}`;
+      } else {
+        msg += "\n\nЗапуск сохранён в истории анализов (если таблица в Supabase создана).";
+      }
+      setTurns((t) => [...t, { role: "assistant", content: msg }]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ошибка анализа конкурентов");
+    } finally {
+      setJobBusy(null);
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
+    }
+  }, [fact, gapsOk, chatLoading, jobBusy, doc, setDoc]);
+
   const send = useCallback(async () => {
     const text = input.trim();
-    if ((!text && pendingFiles.length === 0) || loading) return;
+    if ((!text && pendingFiles.length === 0) || chatLoading || jobBusy) return;
 
     const filesSnapshot = pendingFiles;
 
@@ -270,7 +492,7 @@ export function StrategyGigaChat({
 
     const nextTurns: ChatTurn[] = [...turns, { role: "user", content: displayUser }];
     setTurns(nextTurns);
-    setLoading(true);
+    setChatLoading(true);
     const controller = new AbortController();
     const abortTimer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
@@ -338,10 +560,10 @@ export function StrategyGigaChat({
       if (text) setInput(text);
     } finally {
       window.clearTimeout(abortTimer);
-      setLoading(false);
+      setChatLoading(false);
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
     }
-  }, [input, loading, turns, strategyContext, cabinetContext, pendingFiles]);
+  }, [input, chatLoading, jobBusy, turns, strategyContext, cabinetContext, pendingFiles]);
 
   const scrollBoxClass = fullscreen
     ? "min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain rounded-2xl border border-neutral-200/80 bg-white px-4 py-4 sm:px-5"
@@ -363,10 +585,48 @@ export function StrategyGigaChat({
               Чат с GigaChat
             </h3>
             <p className="mt-1 text-sm text-neutral-600">
-              Стратегия, точка А/Б, каналы. В запрос уходят фактура из ЛК и текст стратегии. Вложения: только текстовые{" "}
-              <span className="font-medium">.txt, .md, .csv</span> (до 48 КБ). Изображения и PDF в эту модель{" "}
-              <span className="font-medium">не передаются</span> — опишите снимок словами или сохраните текст в .txt.
+              Сборка стратегии, Вордстат и конкуренты — кнопками ниже (прогресс в этом же окне). Свободные вопросы — в поле ввода;
+              в запрос уходят фактура и текст стратегии. Вложения: только{" "}
+              <span className="font-medium">.txt, .md, .csv</span> (до 48 КБ). Фото и PDF в модель{" "}
+              <span className="font-medium">не передаются</span>.
             </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={!gapsOk || !fact || busy}
+                onClick={() => void runStrategyJob()}
+                className="inline-flex items-center rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-900 shadow-sm transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Собрать стратегию из фактуры
+              </button>
+              <button
+                type="button"
+                disabled={!gapsOk || !fact || busy}
+                onClick={() => void runWordstatJob()}
+                className="inline-flex items-center rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-900 shadow-sm transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Анализ спроса (Вордстат)
+              </button>
+              <button
+                type="button"
+                disabled={!gapsOk || !fact || busy}
+                onClick={() => void runCompetitorJob()}
+                className="inline-flex items-center rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-900 shadow-sm transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Анализ конкурентов
+              </button>
+              <Link
+                href={withBasePath("/app/strategy/history")}
+                className="inline-flex items-center self-center text-xs font-medium text-[#5E4FFF] underline underline-offset-2 hover:text-[#6B5CFF]"
+              >
+                История анализов
+              </Link>
+            </div>
+            {!gapsOk ? (
+              <p className="mt-2 text-xs text-amber-900/90">
+                Сначала заполните обязательные поля фактуры — кнопки станут активны.
+              </p>
+            ) : null}
             {cloudPersist === "need_login" ? (
               <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
                 История чата не сохраняется после обновления страницы, пока ты не{" "}
@@ -408,14 +668,14 @@ export function StrategyGigaChat({
               )
             )
           )}
-          {loading ? (
+          {busy ? (
             <div className="rounded-2xl border border-[#6B5CFF]/20 bg-[#F4F2FF] px-4 py-3 text-left">
               <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-neutral-800">
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#6B5CFF]" aria-hidden />
-                Идёт ответ…
+                {progressTitle}
               </div>
               <ol className="space-y-1.5 text-[11px] leading-snug text-neutral-600">
-                {PROGRESS_STEPS.map((label, i) => {
+                {activeProgressSteps.map((label, i) => {
                   const done = i < progressPhase;
                   const current = i === progressPhase;
                   return (
@@ -437,7 +697,8 @@ export function StrategyGigaChat({
                 })}
               </ol>
               <p className="mt-2 text-[10px] text-neutral-500">
-                Пока идёт запрос, поле ввода временно недоступно — так вы не отправите дубликат. Обычно это до 1–2 минут.
+                Пока идёт операция, поле ввода недоступно. Ответ GigaChat в чате — обычно до 1–2 минут; Вордстат и конкуренты могут
+                занять дольше.
               </p>
             </div>
           ) : null}
@@ -480,7 +741,7 @@ export function StrategyGigaChat({
           />
           <button
             type="button"
-            disabled={loading}
+            disabled={busy}
             onClick={() => fileRef.current?.click()}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 disabled:opacity-40"
             aria-label="Прикрепить файл"
@@ -500,11 +761,11 @@ export function StrategyGigaChat({
             rows={1}
             placeholder="Спросите про стратегию…"
             className="max-h-36 min-h-[44px] w-0 min-w-0 flex-1 resize-none border-0 bg-transparent py-2.5 text-sm text-neutral-900 outline-none placeholder:text-neutral-400"
-            disabled={loading}
+            disabled={busy}
           />
           <button
             type="button"
-            disabled={loading || (!input.trim() && pendingFiles.length === 0)}
+            disabled={busy || (!input.trim() && pendingFiles.length === 0)}
             onClick={() => void send()}
             className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#6B5CFF] text-white shadow-sm transition hover:bg-[#5E4FFF] disabled:cursor-not-allowed disabled:opacity-40"
             aria-label="Отправить"
