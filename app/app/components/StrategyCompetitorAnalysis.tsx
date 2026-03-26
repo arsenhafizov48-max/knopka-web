@@ -128,6 +128,7 @@ export function StrategyCompetitorAnalysis({ fact, gapsOk }: Props) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [persistWarn, setPersistWarn] = useState<string | null>(null);
   const [data, setData] = useState<CompetitorAnalysisPayload | null>(null);
   const [mapTab, setMapTab] = useState<MapTab>("yandex");
 
@@ -141,6 +142,7 @@ export function StrategyCompetitorAnalysis({ fact, gapsOk }: Props) {
     setLoading(true);
     setErr(null);
     setOk(null);
+    setPersistWarn(null);
     try {
       const apiUrl = resolveSameOriginApiUrl("/api/strategy/competitor-analyze");
       const res = await fetch(apiUrl, {
@@ -152,10 +154,12 @@ export function StrategyCompetitorAnalysis({ fact, gapsOk }: Props) {
       const rawText = await res.text();
       let json: {
         error?: string;
+        warning?: string;
+        persisted?: boolean;
         sites?: CompetitorSiteRow[];
         yandexMaps?: CompetitorMapRow[];
         gis2?: CompetitorMapRow[];
-        id?: string;
+        id?: string | null;
       };
       try {
         json = JSON.parse(rawText) as typeof json;
@@ -176,7 +180,12 @@ export function StrategyCompetitorAnalysis({ fact, gapsOk }: Props) {
         yandexMaps: json.yandexMaps ?? [],
         gis2: json.gis2 ?? [],
       });
-      setOk("Анализ сохранён в истории.");
+      if (json.persisted === false && json.warning) {
+        setPersistWarn(json.warning);
+        setOk("Готово — таблицы ниже можно скачать CSV.");
+      } else {
+        setOk("Анализ сохранён в истории.");
+      }
     } finally {
       setLoading(false);
     }
@@ -226,7 +235,12 @@ export function StrategyCompetitorAnalysis({ fact, gapsOk }: Props) {
       ) : null}
 
       {err ? <p className="mt-3 text-sm text-red-700">{err}</p> : null}
-      {ok ? <p className="mt-3 text-sm text-emerald-800">{ok}</p> : null}
+      {persistWarn ? (
+        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          {persistWarn}
+        </p>
+      ) : null}
+      {ok ? <p className="mt-3 rounded-xl bg-emerald-50/90 px-3 py-2 text-sm text-emerald-950">{ok}</p> : null}
 
       {data ? (
         <div className="mt-6 space-y-6">

@@ -51,10 +51,13 @@ export function StrategyWordstatDemand({ fact, doc, setDoc, gapsOk }: Props) {
       } catch {
         const isHtml =
           rawText.trimStart().startsWith("<!") || rawText.trimStart().toLowerCase().startsWith("<html");
-        if (isHtml) {
+        if (res.status === 502 || res.status === 504) {
           setErr(
-            `Ответ не JSON (код ${res.status}), запрос шёл на: ${apiUrl}. ` +
-              `Если в адресе сайта есть префикс после домена (например /кнопка), в Vercel в Environment Variables добавьте NEXT_PUBLIC_BASE_PATH ровно с этим префиксом и сделайте Redeploy — без этого Next не вешает /api на этот путь.`
+            `Сервер не успел завершить запрос (код ${res.status}, часто таймаут). Анализ спроса тяжёлый: Вордстат + два вызова GigaChat. На Vercel Hobby лимит ~10 с — смените план или задеплойте с \`maxDuration\` в route (уже в коде). Повторите запрос через минуту.`
+          );
+        } else if (isHtml) {
+          setErr(
+            `Ответ не JSON (код ${res.status}), запрос: ${apiUrl}. Если сайт открывается с префиксом пути (например /knopka), в Vercel задайте NEXT_PUBLIC_BASE_PATH и сделайте Redeploy.`
           );
         } else {
           setErr(rawText.slice(0, 220));

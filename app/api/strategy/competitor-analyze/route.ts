@@ -6,8 +6,22 @@ import { parseCompetitorAnalysisJson } from "@/app/app/lib/strategy/parseCompeti
 import { gigachatChatCompletion } from "@/app/lib/gigachat/server";
 import { getSupabaseServerClient } from "@/app/lib/supabaseServer";
 
+/** Лимит времени на Vercel Pro (на Hobby часто ~10 с — см. документацию хостинга). */
+export const maxDuration = 120;
+
 function bad(msg: string, status = 400) {
   return NextResponse.json({ error: msg }, { status });
+}
+
+function isStrategyCompetitorRunsTableMissing(err: { message?: string; code?: string } | null): boolean {
+  if (!err?.message) return false;
+  const m = err.message.toLowerCase();
+  return (
+    m.includes("strategy_competitor_runs") ||
+    m.includes("schema cache") ||
+    m.includes("does not exist") ||
+    err.code === "PGRST205"
+  );
 }
 
 function parseModelJson(text: string): Record<string, unknown> {
@@ -138,6 +152,17 @@ export async function POST(req: Request) {
     .select("id, created_at")
     .single();
 
+  if (insErr && isStrategyCompetitorRunsTableMissing(insErr)) {
+    return NextResponse.json({
+      ...payload,
+      id: null as string | null,
+      createdAt: null as string | null,
+      persisted: false,
+      warning:
+        "Таблица в Supabase ещё не создана: в панели проекта выполните SQL из файла supabase/migrations/008_strategy_competitor_runs.sql (раздел SQL Editor → Run). Пока анализ показан ниже, но в «Историю анализов» не попал.",
+    });
+  }
+
   if (insErr || !row) {
     return NextResponse.json(
       { error: insErr?.message ?? "Не удалось сохранить анализ" },
@@ -148,6 +173,7 @@ export async function POST(req: Request) {
   return NextResponse.json({
     id: row.id,
     createdAt: row.created_at,
+    persisted: true,
     ...payload,
   });
 }

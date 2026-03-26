@@ -16,6 +16,9 @@ import {
 } from "@/app/lib/wordstat/regionResolve";
 import type { WordstatTopRequestsResult } from "@/app/lib/wordstat/types";
 
+/** Вордстат + два вызова GigaChat — долго; на Vercel Pro до 300 с. На Hobby лимит ~10 с — возможен 502. */
+export const maxDuration = 300;
+
 const N_TARGET = 10;
 const N_BROAD = 30;
 const TOP_N = 8;
