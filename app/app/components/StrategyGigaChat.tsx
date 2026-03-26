@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Maximize2, MessageCircle, Minimize2, Paperclip, Send, X } from "lucide-react";
+import { Check, Loader2, Maximize2, MessageCircle, Minimize2, Paperclip, Send, X } from "lucide-react";
 
 import { getSupabaseBrowserClient } from "@/app/lib/supabaseClient";
 import { withBasePath, resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
@@ -15,6 +15,16 @@ import { formatProjectFactForAi } from "@/app/app/lib/gigachat/formatProjectFact
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
 
 const DEV_SKIP_AUTH = process.env.NEXT_PUBLIC_KNOPKA_DEV_SKIP_AUTH === "1";
+
+/** Пока ждём ответ API — смена подписей, чтобы было видно прогресс (как этапы в Cursor). */
+const PROGRESS_STEPS = [
+  "Собираю фактуру бизнеса из кабинета…",
+  "Подключаю текст стратегии (включая блок «Рынок», если вы уже запускали Вордстат)…",
+  "Отправляю запрос в GigaChat…",
+  "Жду ответ модели…",
+] as const;
+
+const FETCH_TIMEOUT_MS = 120_000;
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
 
@@ -89,6 +99,7 @@ export function StrategyGigaChat({
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [fullscreen, setFullscreen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [progressPhase, setProgressPhase] = useState(0);
   /** Без сессии Supabase историю в облако не пишем (имя в шапке ЛК может быть просто заглушкой). */
   const [cloudPersist, setCloudPersist] = useState<
     "checking" | "signed_in" | "need_login" | "dev_skip"
@@ -99,6 +110,18 @@ export function StrategyGigaChat({
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!loading) {
+      setProgressPhase(0);
+      return;
+    }
+    setProgressPhase(0);
+    const id = window.setInterval(() => {
+      setProgressPhase((p) => (p < PROGRESS_STEPS.length - 1 ? p + 1 : p));
+    }, 850);
+    return () => window.clearInterval(id);
+  }, [loading]);
 
   useEffect(() => {
     if (DEV_SKIP_AUTH) return;
@@ -248,11 +271,14 @@ export function StrategyGigaChat({
     const nextTurns: ChatTurn[] = [...turns, { role: "user", content: displayUser }];
     setTurns(nextTurns);
     setLoading(true);
+    const controller = new AbortController();
+    const abortTimer = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
       const res = await fetch(resolveSameOriginApiUrl("/api/gigachat/chat"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
+        signal: controller.signal,
         body: JSON.stringify({
           text: composed,
           strategyContext: strategyContext || undefined,
@@ -280,22 +306,27 @@ export function StrategyGigaChat({
       }
       const finalTurns: ChatTurn[] = [...nextTurns, { role: "assistant", content: data.reply! }];
       setTurns(finalTurns);
+      /* Важно: не ждём Supabase здесь — иначе при подвисшем upsert «loading» не сбросится и чат «замрёт». */
       if (!DEV_SKIP_AUTH) {
-        try {
-          const supabase = getSupabaseBrowserClient();
-          const {
-            data: { user },
-          } = await supabase.auth.getUser();
-          if (user) {
-            await saveStrategyThread(supabase, user.id, finalTurns);
+        void (async () => {
+          try {
+            const supabase = getSupabaseBrowserClient();
+            const {
+              data: { user },
+            } = await supabase.auth.getUser();
+            if (user) {
+              await saveStrategyThread(supabase, user.id, finalTurns);
+            }
+          } catch (persistErr) {
+            console.warn("[КНОПКА] Не удалось сохранить историю чата:", persistErr);
           }
-        } catch (persistErr) {
-          console.warn("[КНОПКА] Не удалось сохранить историю чата:", persistErr);
-        }
+        })();
       }
     } catch (e: unknown) {
       let msg = e instanceof Error ? e.message : "Не удалось отправить";
-      if (msg === "Failed to fetch" || /networkerror|load failed/i.test(msg)) {
+      if (e instanceof DOMException && e.name === "AbortError") {
+        msg = `Превышено время ожидания (${Math.round(FETCH_TIMEOUT_MS / 1000)} с). Попробуйте короче сообщение или повторите позже.`;
+      } else if (msg === "Failed to fetch" || /networkerror|load failed/i.test(msg)) {
         msg =
           "Нет ответа от сервера (сеть, VPN, блокировка или неверный адрес API). Проверьте подключение; на проде — переменную NEXT_PUBLIC_BASE_PATH, если сайт открывается с префиксом в URL.";
       }
@@ -306,6 +337,7 @@ export function StrategyGigaChat({
       setPendingFiles(filesSnapshot);
       if (text) setInput(text);
     } finally {
+      window.clearTimeout(abortTimer);
       setLoading(false);
       setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 80);
     }
@@ -331,8 +363,9 @@ export function StrategyGigaChat({
               Чат с GigaChat
             </h3>
             <p className="mt-1 text-sm text-neutral-600">
-              Стратегия, точка А/Б, каналы. В запрос уходит фактура из ЛК и текст стратегии. Файлы: .txt, .md, .csv. Фото
-              пока не в модель.
+              Стратегия, точка А/Б, каналы. В запрос уходят фактура из ЛК и текст стратегии. Вложения: только текстовые{" "}
+              <span className="font-medium">.txt, .md, .csv</span> (до 48 КБ). Изображения и PDF в эту модель{" "}
+              <span className="font-medium">не передаются</span> — опишите снимок словами или сохраните текст в .txt.
             </p>
             {cloudPersist === "need_login" ? (
               <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
@@ -376,7 +409,37 @@ export function StrategyGigaChat({
             )
           )}
           {loading ? (
-            <div className="text-center text-xs text-neutral-500">GigaChat печатает…</div>
+            <div className="rounded-2xl border border-[#6B5CFF]/20 bg-[#F4F2FF] px-4 py-3 text-left">
+              <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-neutral-800">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#6B5CFF]" aria-hidden />
+                Идёт ответ…
+              </div>
+              <ol className="space-y-1.5 text-[11px] leading-snug text-neutral-600">
+                {PROGRESS_STEPS.map((label, i) => {
+                  const done = i < progressPhase;
+                  const current = i === progressPhase;
+                  return (
+                    <li key={label} className="flex items-start gap-2">
+                      <span className="mt-0.5 shrink-0" aria-hidden>
+                        {done ? (
+                          <Check className="h-3.5 w-3.5 text-emerald-600" />
+                        ) : current ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[#6B5CFF]" />
+                        ) : (
+                          <span className="inline-block h-3.5 w-3.5 rounded-full border border-neutral-300" />
+                        )}
+                      </span>
+                      <span className={current ? "font-medium text-neutral-900" : done ? "text-neutral-500" : "text-neutral-400"}>
+                        {label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+              <p className="mt-2 text-[10px] text-neutral-500">
+                Пока идёт запрос, поле ввода временно недоступно — так вы не отправите дубликат. Обычно это до 1–2 минут.
+              </p>
+            </div>
           ) : null}
           <div ref={bottomRef} />
         </div>
@@ -421,7 +484,7 @@ export function StrategyGigaChat({
             onClick={() => fileRef.current?.click()}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-neutral-100 hover:text-neutral-800 disabled:opacity-40"
             aria-label="Прикрепить файл"
-            title="Текстовый файл: .txt, .md, .csv"
+            title=".txt, .md, .csv — не фото и не PDF"
           >
             <Paperclip className="h-5 w-5" />
           </button>
