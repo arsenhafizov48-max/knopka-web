@@ -1,6 +1,10 @@
+import { ensureProjectsBootstrap, scopedKey } from "@/app/app/lib/activeProject";
 import type { ReportInstance } from "./types";
 
-const KEY = "knopka.reports.v1";
+function reportsKey(): string {
+  ensureProjectsBootstrap();
+  return scopedKey("reports.v1");
+}
 
 function safeParse(json: string | null): any {
   try {
@@ -12,14 +16,14 @@ function safeParse(json: string | null): any {
 
 function readAll(): ReportInstance[] {
   if (typeof window === "undefined") return [];
-  const raw = window.localStorage.getItem(KEY);
+  const raw = window.localStorage.getItem(reportsKey());
   const parsed = safeParse(raw);
   return Array.isArray(parsed) ? (parsed as ReportInstance[]) : [];
 }
 
 function writeAll(items: ReportInstance[]) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(KEY, JSON.stringify(items));
+  window.localStorage.setItem(reportsKey(), JSON.stringify(items));
 }
 
 export function saveReport(report: ReportInstance) {

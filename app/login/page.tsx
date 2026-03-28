@@ -33,7 +33,6 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [acceptedLegal, setAcceptedLegal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [infoText, setInfoText] = useState<string | null>(null);
@@ -65,10 +64,6 @@ export default function LoginPage() {
   }, [captchaToken]);
 
   const signInOAuth = async (provider: OauthId) => {
-    if (!acceptedLegal) {
-      setErrorText("Подтвердите согласие с документами");
-      return;
-    }
     setErrorText(null);
     setInfoText(null);
     if (!(await verifyCaptcha())) return;
@@ -99,11 +94,6 @@ export default function LoginPage() {
     e.preventDefault();
     setErrorText(null);
     setInfoText(null);
-
-    if (!acceptedLegal) {
-      setErrorText("Подтвердите согласие с документами");
-      return;
-    }
 
     const cleanEmail = email.trim();
     if (!cleanEmail) {
@@ -265,30 +255,6 @@ export default function LoginPage() {
           {infoText ? (
             <div className="rounded-xl bg-neutral-100 px-4 py-3 text-sm text-neutral-800">{infoText}</div>
           ) : null}
-
-          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-neutral-200 bg-neutral-50/50 p-3 text-left text-sm leading-snug text-neutral-700">
-            <input
-              type="checkbox"
-              checked={acceptedLegal}
-              onChange={(e) => setAcceptedLegal(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 rounded border-neutral-300"
-            />
-            <span>
-              Соглашаюсь с{" "}
-              <Link href="/legal/privacy" className="font-medium text-[#5E4FFF] hover:underline">
-                политикой конфиденциальности
-              </Link>
-              , даю{" "}
-              <Link href="/legal/consent" className="font-medium text-[#5E4FFF] hover:underline">
-                согласие на обработку ПДн
-              </Link>{" "}
-              и принимаю{" "}
-              <Link href="/legal/terms" className="font-medium text-[#5E4FFF] hover:underline">
-                пользовательское соглашение
-              </Link>
-              .
-            </span>
-          </label>
 
           <button
             type="submit"

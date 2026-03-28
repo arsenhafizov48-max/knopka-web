@@ -1,7 +1,11 @@
+import { DEFAULT_PROJECT_ID, ensureProjectsBootstrap, getActiveProjectId, scopedKey } from "@/app/app/lib/activeProject";
 import { migrateStrategyDocument } from "@/app/app/lib/strategy/migrateDocument";
 import type { StrategyDocument } from "./types";
 
-export const STRATEGY_STORAGE_KEY = "knopka.strategy.v1";
+export function getStrategyStorageKey(): string {
+  ensureProjectsBootstrap();
+  return scopedKey("strategy.v1");
+}
 
 type Stored = {
   document: StrategyDocument;
@@ -20,7 +24,15 @@ function safeParse(raw: string | null): Stored | null {
 
 export function loadStrategy(): StrategyDocument | null {
   if (typeof window === "undefined") return null;
-  const s = safeParse(window.localStorage.getItem(STRATEGY_STORAGE_KEY));
+  const key = getStrategyStorageKey();
+  let s = safeParse(window.localStorage.getItem(key));
+  if (!s?.document && getActiveProjectId() === DEFAULT_PROJECT_ID) {
+    const legacy = safeParse(window.localStorage.getItem("knopka.strategy.v1"));
+    if (legacy?.document) {
+      saveStrategy(migrateStrategyDocument(legacy.document));
+      s = legacy;
+    }
+  }
   if (!s?.document) return null;
   return migrateStrategyDocument(s.document);
 }
@@ -28,12 +40,12 @@ export function loadStrategy(): StrategyDocument | null {
 export function saveStrategy(document: StrategyDocument) {
   if (typeof window === "undefined") return;
   const payload: Stored = { document };
-  window.localStorage.setItem(STRATEGY_STORAGE_KEY, JSON.stringify(payload));
+  window.localStorage.setItem(getStrategyStorageKey(), JSON.stringify(payload));
   window.dispatchEvent(new Event("knopka:strategyUpdated"));
 }
 
 export function clearStrategy() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(STRATEGY_STORAGE_KEY);
+  window.localStorage.removeItem(getStrategyStorageKey());
   window.dispatchEvent(new Event("knopka:strategyUpdated"));
 }

@@ -1,3 +1,5 @@
+import { DEFAULT_PROJECT_ID, ensureProjectsBootstrap, getActiveProjectId, scopedKey } from "@/app/app/lib/activeProject";
+
 export type ChannelDef = {
   id: string;
   title: string;
@@ -51,9 +53,22 @@ export type DailyEntryV2 = {
   notes?: string;
 };
 
-export const KEY_DAILY_V2 = "knopka.data.daily.v2";
 const KEY_DAILY_V1 = "knopka.data.daily.v1";
-export const KEY_DATA_CHANNELS = "knopka.data.channels.v1";
+
+export function getDailyV2Key(): string {
+  ensureProjectsBootstrap();
+  return scopedKey("data.daily.v2");
+}
+
+export function getDataChannelsKey(): string {
+  ensureProjectsBootstrap();
+  return scopedKey("data.channels.v1");
+}
+
+export function getHiddenChannelsKey(): string {
+  ensureProjectsBootstrap();
+  return scopedKey("data.channels.hidden.v1");
+}
 
 const DEFAULT_CHANNELS: ChannelDef[] = [
   { id: "avito", title: "Авито" },
@@ -96,7 +111,7 @@ function slugify(input: string) {
 export function listChannels(): ChannelDef[] {
   if (!isBrowser()) return DEFAULT_CHANNELS;
 
-  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_DATA_CHANNELS), []);
+  const custom = safeParse<ChannelDef[]>(localStorage.getItem(getDataChannelsKey()), []);
   const merged = [...DEFAULT_CHANNELS];
 
   for (const c of custom) {
@@ -123,10 +138,10 @@ export function addCustomChannel(title: string): ChannelDef | null {
     id = `${id}-${i}`;
   }
 
-  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_DATA_CHANNELS), []);
+  const custom = safeParse<ChannelDef[]>(localStorage.getItem(getDataChannelsKey()), []);
   const ch: ChannelDef = { id, title: t, isCustom: true };
   custom.push(ch);
-  localStorage.setItem(KEY_DATA_CHANNELS, JSON.stringify(custom));
+  localStorage.setItem(getDataChannelsKey(), JSON.stringify(custom));
 
   return ch;
 }
@@ -134,9 +149,9 @@ export function addCustomChannel(title: string): ChannelDef | null {
 export function removeCustomChannel(id: string) {
   if (!isBrowser()) return;
 
-  const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_DATA_CHANNELS), []);
+  const custom = safeParse<ChannelDef[]>(localStorage.getItem(getDataChannelsKey()), []);
   const next = custom.filter((c) => c.id !== id);
-  localStorage.setItem(KEY_DATA_CHANNELS, JSON.stringify(next));
+  localStorage.setItem(getDataChannelsKey(), JSON.stringify(next));
 }
 
 function migrateV1toV2(): DailyEntryV2[] {
@@ -174,21 +189,25 @@ function migrateV1toV2(): DailyEntryV2[] {
   // добавим канал "Общий" в кастомные, чтобы он нормально отображался
   const channels = listChannels();
   if (!channels.some((c) => c.id === "total")) {
-    const custom = safeParse<ChannelDef[]>(localStorage.getItem(KEY_DATA_CHANNELS), []);
+    const custom = safeParse<ChannelDef[]>(localStorage.getItem(getDataChannelsKey()), []);
     custom.push({ id: "total", title: "Общий", isCustom: true });
-    localStorage.setItem(KEY_DATA_CHANNELS, JSON.stringify(custom));
+    localStorage.setItem(getDataChannelsKey(), JSON.stringify(custom));
   }
 
-  localStorage.setItem(KEY_DAILY_V2, JSON.stringify(migrated));
+  localStorage.setItem(getDailyV2Key(), JSON.stringify(migrated));
   return migrated;
 }
 
 export function listDaily(): DailyEntryV2[] {
   if (!isBrowser()) return [];
 
-  const v2 = safeParse<DailyEntryV2[]>(localStorage.getItem(KEY_DAILY_V2), []);
+  const v2 = safeParse<DailyEntryV2[]>(localStorage.getItem(getDailyV2Key()), []);
   if (Array.isArray(v2) && v2.length > 0) {
     return v2.slice().sort((a, b) => (a.date > b.date ? -1 : 1));
+  }
+
+  if (getActiveProjectId() !== DEFAULT_PROJECT_ID) {
+    return [];
   }
 
   const migrated = migrateV1toV2();
@@ -206,7 +225,7 @@ export function upsertDaily(entry: DailyEntryV2) {
   const all = listDaily();
   const next = all.filter((x) => x.date !== entry.date);
   next.unshift(entry);
-  localStorage.setItem(KEY_DAILY_V2, JSON.stringify(next));
+  localStorage.setItem(getDailyV2Key(), JSON.stringify(next));
   window.dispatchEvent(new Event("knopka:dailyDataUpdated"));
 }
 
@@ -214,13 +233,12 @@ export function deleteDaily(date: string) {
   if (!isBrowser()) return;
   const all = listDaily();
   const next = all.filter((x) => x.date !== date);
-  localStorage.setItem(KEY_DAILY_V2, JSON.stringify(next));
+  localStorage.setItem(getDailyV2Key(), JSON.stringify(next));
 }
-export const KEY_HIDDEN_CHANNELS = "knopka.data.channels.hidden.v1";
 
 export function listHiddenChannelIds(): string[] {
   if (!isBrowser()) return [];
-  const ids = safeParse<string[]>(localStorage.getItem(KEY_HIDDEN_CHANNELS), []);
+  const ids = safeParse<string[]>(localStorage.getItem(getHiddenChannelsKey()), []);
   return Array.isArray(ids) ? ids.filter(Boolean) : [];
 }
 
@@ -228,11 +246,11 @@ export function hideChannel(id: string) {
   if (!isBrowser()) return;
   const ids = new Set(listHiddenChannelIds());
   ids.add(id);
-  localStorage.setItem(KEY_HIDDEN_CHANNELS, JSON.stringify(Array.from(ids)));
+  localStorage.setItem(getHiddenChannelsKey(), JSON.stringify(Array.from(ids)));
 }
 
 export function showChannel(id: string) {
   if (!isBrowser()) return;
   const ids = listHiddenChannelIds().filter((x) => x !== id);
-  localStorage.setItem(KEY_HIDDEN_CHANNELS, JSON.stringify(ids));
+  localStorage.setItem(getHiddenChannelsKey(), JSON.stringify(ids));
 }

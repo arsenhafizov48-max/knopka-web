@@ -9,7 +9,7 @@ import {
   mergeProjectFactJsonForInitialPull,
   normalizePayloadFromDb,
 } from "@/app/app/lib/cloud/workspacePayload";
-import { PROJECT_FACT_STORAGE_KEY } from "@/app/app/lib/projectFact";
+import { getProjectFactStorageKey } from "@/app/app/lib/projectFact";
 
 const DEV_SKIP_AUTH = process.env.NEXT_PUBLIC_KNOPKA_DEV_SKIP_AUTH === "1";
 const DEBOUNCE_MS = 2800;
@@ -53,7 +53,7 @@ export default function WorkspaceSync() {
       const normalized = normalizePayloadFromDb(data?.payload);
 
       if (normalized && hasCloudData(normalized)) {
-        const localFact = window.localStorage.getItem(PROJECT_FACT_STORAGE_KEY);
+        const localFact = window.localStorage.getItem(getProjectFactStorageKey());
         const merged: typeof normalized = {
           ...normalized,
           projectFactJson: mergeProjectFactJsonForInitialPull(

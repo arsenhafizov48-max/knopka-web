@@ -7,9 +7,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Loader2, Maximize2, MessageCircle, Minimize2, Paperclip, Send, X } from "lucide-react";
 
-import { getSupabaseBrowserClient } from "@/app/lib/supabaseClient";
 import { withBasePath, resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
-import { loadStrategyThread, saveStrategyThread } from "@/app/app/lib/gigachat/strategyThreadDb";
+import { ensureProjectsBootstrap, getActiveProjectId, scopedKey } from "@/app/app/lib/activeProject";
 import type { ProjectFact } from "@/app/app/lib/projectFact";
 import { formatProjectFactForAi } from "@/app/app/lib/gigachat/formatProjectFactForAi";
 import { applyCompetitorsToStrategy } from "@/app/app/lib/strategy/applyCompetitorsToStrategy";
@@ -18,8 +17,6 @@ import { buildStrategyDocument } from "@/app/app/lib/strategy/buildFromFact";
 import type { CompetitorAnalysisPayload } from "@/app/app/lib/strategy/competitorTypes";
 import { saveStrategy } from "@/app/app/lib/strategy/storage";
 import type { StrategyDocument } from "@/app/app/lib/strategy/types";
-
-const DEV_SKIP_AUTH = process.env.NEXT_PUBLIC_KNOPKA_DEV_SKIP_AUTH === "1";
 
 /** Пока ждём ответ API — смена подписей, чтобы было видно прогресс (как этапы в Cursor). */
 const GIGACHAT_PROGRESS_STEPS = [
@@ -132,16 +129,55 @@ export function StrategyGigaChat({
   const [fullscreen, setFullscreen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [progressPhase, setProgressPhase] = useState(0);
-  /** Без сессии Supabase историю в облако не пишем (имя в шапке ЛК может быть просто заглушкой). */
-  const [cloudPersist, setCloudPersist] = useState<
-    "checking" | "signed_in" | "need_login" | "dev_skip"
-  >(DEV_SKIP_AUTH ? "dev_skip" : "checking");
+  const [activeProjectId, setActiveProjectId] = useState("");
+  /** Не пишем в localStorage до загрузки истории для текущего проекта — иначе затрём данные при смене проекта. */
+  const [strategyChatHydrated, setStrategyChatHydrated] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    ensureProjectsBootstrap();
+    setActiveProjectId(getActiveProjectId());
+    const on = () => setActiveProjectId(getActiveProjectId());
+    window.addEventListener("knopka:activeProjectChanged", on);
+    return () => window.removeEventListener("knopka:activeProjectChanged", on);
+  }, []);
+
+  const strategyChatStorageKey = useMemo(() => {
+    if (!activeProjectId) return "";
+    return scopedKey("gigachat.strategy.chat.v1");
+  }, [activeProjectId]);
+
+  useEffect(() => {
+    if (!strategyChatStorageKey) return;
+    setStrategyChatHydrated(false);
+    try {
+      const raw = localStorage.getItem(strategyChatStorageKey);
+      if (!raw) {
+        setTurns([]);
+      } else {
+        const parsed = JSON.parse(raw) as ChatTurn[];
+        setTurns(Array.isArray(parsed) ? parsed : []);
+      }
+    } catch {
+      setTurns([]);
+    }
+    const t = window.setTimeout(() => setStrategyChatHydrated(true), 0);
+    return () => window.clearTimeout(t);
+  }, [strategyChatStorageKey]);
+
+  useEffect(() => {
+    if (!strategyChatStorageKey || !strategyChatHydrated) return;
+    try {
+      localStorage.setItem(strategyChatStorageKey, JSON.stringify(turns));
+    } catch {
+      /* ignore quota */
+    }
+  }, [turns, strategyChatStorageKey, strategyChatHydrated]);
 
   const activeProgressSteps = useMemo(() => {
     if (chatLoading) return GIGACHAT_PROGRESS_STEPS;
@@ -174,38 +210,6 @@ export function StrategyGigaChat({
     }, 850);
     return () => window.clearInterval(id);
   }, [chatLoading, jobBusy, activeProgressSteps.length]);
-
-  useEffect(() => {
-    if (DEV_SKIP_AUTH) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const supabase = getSupabaseBrowserClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (cancelled) return;
-        if (!user) {
-          setCloudPersist("need_login");
-          return;
-        }
-        setCloudPersist("signed_in");
-        try {
-          const msgs = await loadStrategyThread(supabase, user.id);
-          if (cancelled || msgs.length === 0) return;
-          setTurns(msgs.map(({ role, content }) => ({ role, content })));
-        } catch (e) {
-          console.warn("[КНОПКА] История чата стратегии не загружена (таблица gigachat_strategy_thread или сеть):", e);
-        }
-      } catch (e) {
-        console.warn("[КНОПКА] Supabase недоступен или не настроен:", e);
-        if (!cancelled) setCloudPersist("need_login");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -528,22 +532,6 @@ export function StrategyGigaChat({
       }
       const finalTurns: ChatTurn[] = [...nextTurns, { role: "assistant", content: data.reply! }];
       setTurns(finalTurns);
-      /* Важно: не ждём Supabase здесь — иначе при подвисшем upsert «loading» не сбросится и чат «замрёт». */
-      if (!DEV_SKIP_AUTH) {
-        void (async () => {
-          try {
-            const supabase = getSupabaseBrowserClient();
-            const {
-              data: { user },
-            } = await supabase.auth.getUser();
-            if (user) {
-              await saveStrategyThread(supabase, user.id, finalTurns);
-            }
-          } catch (persistErr) {
-            console.warn("[КНОПКА] Не удалось сохранить историю чата:", persistErr);
-          }
-        })();
-      }
     } catch (e: unknown) {
       let msg = e instanceof Error ? e.message : "Не удалось отправить";
       if (e instanceof DOMException && e.name === "AbortError") {
@@ -627,20 +615,9 @@ export function StrategyGigaChat({
                 Сначала заполните обязательные поля фактуры — кнопки станут активны.
               </p>
             ) : null}
-            {cloudPersist === "need_login" ? (
-              <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-950">
-                История чата не сохраняется после обновления страницы, пока ты не{" "}
-                <Link href={withBasePath("/login")} className="font-semibold text-[#6B5CFF] underline underline-offset-2">
-                  войдёшь в аккаунт
-                </Link>
-                . Имя в шапке кабинета сейчас только для вида — облако привязано к входу через почту или Google.
-              </p>
-            ) : null}
-            {cloudPersist === "dev_skip" ? (
-              <p className="mt-2 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
-                Режим без авторизации: история чата в Supabase не сохраняется.
-              </p>
-            ) : null}
+            <p className="mt-2 text-xs text-neutral-500">
+              История чата хранится в браузере отдельно для каждого проекта (переключатель в шапке кабинета).
+            </p>
           </div>
         </div>
         <button

@@ -1,5 +1,7 @@
 "use client";
 
+import { DEFAULT_PROJECT_ID, ensureProjectsBootstrap, getActiveProjectId, scopedKey } from "@/app/app/lib/activeProject";
+
 /** =========================
  *  Step-1 types
  *  ========================= */
@@ -149,8 +151,15 @@ export type ProjectFact = {
   updatedAt: string;
 };
 
-export const PROJECT_FACT_STORAGE_KEY = "knopka.projectFact.v4";
+/** Старый ключ без привязки к проекту (миграция). */
+export const PROJECT_FACT_LEGACY_KEY_V4 = "knopka.projectFact.v4";
 const LEGACY_PROJECT_FACT_STORAGE_KEY_V5 = "knopka.projectFact.v5";
+
+export function getProjectFactStorageKey(): string {
+  ensureProjectsBootstrap();
+  return scopedKey("projectFact.v4");
+}
+
 
 function safeString(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
@@ -501,15 +510,25 @@ function safeParse(value: string | null): ProjectFact | null {
 export function loadProjectFact(): ProjectFact {
   if (typeof window === "undefined") return getDefaultProjectFact();
 
-  const rawV4 = window.localStorage.getItem(PROJECT_FACT_STORAGE_KEY);
+  const key = getProjectFactStorageKey();
+  const rawV4 = window.localStorage.getItem(key);
   const parsedV4 = safeParse(rawV4);
   if (parsedV4) return parsedV4;
 
-  const rawV5 = window.localStorage.getItem(LEGACY_PROJECT_FACT_STORAGE_KEY_V5);
-  const parsedV5 = safeParse(rawV5);
-  if (parsedV5) {
-    saveProjectFact(parsedV5);
-    return parsedV5;
+  if (getActiveProjectId() === DEFAULT_PROJECT_ID) {
+    const rawLegacy = window.localStorage.getItem(PROJECT_FACT_LEGACY_KEY_V4);
+    const parsedLegacy = safeParse(rawLegacy);
+    if (parsedLegacy) {
+      saveProjectFact(parsedLegacy);
+      return parsedLegacy;
+    }
+
+    const rawV5 = window.localStorage.getItem(LEGACY_PROJECT_FACT_STORAGE_KEY_V5);
+    const parsedV5 = safeParse(rawV5);
+    if (parsedV5) {
+      saveProjectFact(parsedV5);
+      return parsedV5;
+    }
   }
 
   return getDefaultProjectFact();
@@ -518,7 +537,7 @@ export function loadProjectFact(): ProjectFact {
 export function saveProjectFact(next: ProjectFact) {
   if (typeof window === "undefined") return;
   const payload: ProjectFact = { ...syncDerivedFields(next), updatedAt: new Date().toISOString() };
-  window.localStorage.setItem(PROJECT_FACT_STORAGE_KEY, JSON.stringify(payload));
+  window.localStorage.setItem(getProjectFactStorageKey(), JSON.stringify(payload));
   window.dispatchEvent(new Event("knopka:projectFactUpdated"));
 }
 
@@ -576,7 +595,8 @@ export function setLastStep(step: 1 | 2 | 3 | 4) {
 
 export function clearProjectFact() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(PROJECT_FACT_STORAGE_KEY);
+  window.localStorage.removeItem(getProjectFactStorageKey());
+  window.localStorage.removeItem(PROJECT_FACT_LEGACY_KEY_V4);
   window.localStorage.removeItem(LEGACY_PROJECT_FACT_STORAGE_KEY_V5);
   window.dispatchEvent(new Event("knopka:projectFactUpdated"));
 }

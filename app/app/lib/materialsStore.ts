@@ -1,5 +1,7 @@
 "use client";
 
+import { DEFAULT_PROJECT_ID, ensureProjectsBootstrap, getActiveProjectId, scopedKey } from "@/app/app/lib/activeProject";
+
 /**
  * materialsStore.ts
  *
@@ -26,10 +28,18 @@ export type MaterialFileMeta = {
 
 export type ParsedFileRef = { kind: MaterialKind; id: string };
 
-const LS_KEY = "knopka.materials.v1";
-const DB_NAME = "knopka";
 const DB_VERSION = 1;
 const STORE_NAME = "materials";
+
+function lsKey(): string {
+  ensureProjectsBootstrap();
+  return scopedKey("materials.v1");
+}
+
+function materialsDbName(): string {
+  const id = getActiveProjectId();
+  return id === DEFAULT_PROJECT_ID ? "knopka" : `knopka_p_${id}`;
+}
 
 type LsShape = {
   commercial: MaterialFileMeta[];
@@ -71,15 +81,21 @@ export function makeFileRef(kind: MaterialKind, id: string): string {
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+let dbBoundName: string | null = null;
 
 function openDb(): Promise<IDBDatabase> {
   if (typeof window === "undefined") {
     return Promise.reject(new Error("IndexedDB is not available on server"));
   }
+  const name = materialsDbName();
+  if (dbBoundName !== name) {
+    dbPromise = null;
+    dbBoundName = name;
+  }
   if (dbPromise) return dbPromise;
 
   dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    const req = indexedDB.open(name, DB_VERSION);
 
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -99,7 +115,7 @@ function readLs(): LsShape {
   if (typeof window === "undefined") {
     return { commercial: [], price: [], brand: [] };
   }
-  const raw = window.localStorage.getItem(LS_KEY);
+  const raw = window.localStorage.getItem(lsKey());
   if (!raw) return { commercial: [], price: [], brand: [] };
 
   try {
@@ -134,7 +150,7 @@ function readLs(): LsShape {
 
 function writeLs(next: LsShape) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(LS_KEY, JSON.stringify(next));
+  window.localStorage.setItem(lsKey(), JSON.stringify(next));
   // единое событие, чтобы UI обновлялся
   window.dispatchEvent(new Event("knopka:materialsUpdated"));
 }

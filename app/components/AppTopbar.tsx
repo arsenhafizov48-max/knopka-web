@@ -6,6 +6,7 @@ import { FileText, MessageCircle } from "lucide-react";
 
 import AssistantDrawer from "@/app/components/AssistantDrawer";
 import CabinetNotificationsBell from "@/app/components/CabinetNotificationsBell";
+import ProjectSwitcher from "@/app/components/ProjectSwitcher";
 
 export default function AppTopbar() {
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -14,8 +15,8 @@ export default function AppTopbar() {
     <>
       <div className="flex items-center justify-between gap-3">
         {/* LEFT: LOGO */}
-        <div className="flex items-center gap-3">
-          <Link href="/app/dashboard" className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <Link href="/app/dashboard" className="flex shrink-0 items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#EDEBFF] text-sm font-semibold text-[#2B2B2B]">
               K
             </div>
@@ -25,6 +26,9 @@ export default function AppTopbar() {
               <div className="text-[12px] text-neutral-500">Личный кабинет</div>
             </div>
           </Link>
+          <div className="min-w-0 max-w-full sm:max-w-[16rem]">
+            <ProjectSwitcher />
+          </div>
         </div>
 
         {/* RIGHT */}

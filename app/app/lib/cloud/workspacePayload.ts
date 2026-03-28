@@ -2,13 +2,13 @@
  * Сборка / применение снимка localStorage для синхронизации с Supabase (таблица knopka_workspace).
  */
 
-import { PROJECT_FACT_STORAGE_KEY } from "@/app/app/lib/projectFact";
 import {
-  KEY_DAILY_V2,
-  KEY_DATA_CHANNELS,
-  KEY_HIDDEN_CHANNELS,
+  getDailyV2Key,
+  getDataChannelsKey,
+  getHiddenChannelsKey,
 } from "@/app/app/lib/data/storage";
-import { STRATEGY_STORAGE_KEY } from "@/app/app/lib/strategy/storage";
+import { getProjectFactStorageKey } from "@/app/app/lib/projectFact";
+import { getStrategyStorageKey } from "@/app/app/lib/strategy/storage";
 
 export const WORKSPACE_PAYLOAD_VERSION = 1 as const;
 
@@ -37,11 +37,11 @@ export function collectWorkspaceFromLocalStorage(): KnopkaWorkspacePayload {
   if (typeof window === "undefined") return emptyWorkspacePayload();
   return {
     v: WORKSPACE_PAYLOAD_VERSION,
-    projectFactJson: window.localStorage.getItem(PROJECT_FACT_STORAGE_KEY),
-    strategyJson: window.localStorage.getItem(STRATEGY_STORAGE_KEY),
-    dailyV2Json: window.localStorage.getItem(KEY_DAILY_V2),
-    dataChannelsJson: window.localStorage.getItem(KEY_DATA_CHANNELS),
-    hiddenChannelsJson: window.localStorage.getItem(KEY_HIDDEN_CHANNELS),
+    projectFactJson: window.localStorage.getItem(getProjectFactStorageKey()),
+    strategyJson: window.localStorage.getItem(getStrategyStorageKey()),
+    dailyV2Json: window.localStorage.getItem(getDailyV2Key()),
+    dataChannelsJson: window.localStorage.getItem(getDataChannelsKey()),
+    hiddenChannelsJson: window.localStorage.getItem(getHiddenChannelsKey()),
   };
 }
 
@@ -83,11 +83,11 @@ export function applyWorkspacePayloadToLocalStorage(p: KnopkaWorkspacePayload) {
     }
   };
 
-  setOrRemove(PROJECT_FACT_STORAGE_KEY, p.projectFactJson);
-  setOrRemove(STRATEGY_STORAGE_KEY, p.strategyJson);
-  setOrRemove(KEY_DAILY_V2, p.dailyV2Json);
-  setOrRemove(KEY_DATA_CHANNELS, p.dataChannelsJson);
-  setOrRemove(KEY_HIDDEN_CHANNELS, p.hiddenChannelsJson);
+  setOrRemove(getProjectFactStorageKey(), p.projectFactJson);
+  setOrRemove(getStrategyStorageKey(), p.strategyJson);
+  setOrRemove(getDailyV2Key(), p.dailyV2Json);
+  setOrRemove(getDataChannelsKey(), p.dataChannelsJson);
+  setOrRemove(getHiddenChannelsKey(), p.hiddenChannelsJson);
 
   window.dispatchEvent(new Event("knopka:projectFactUpdated"));
   window.dispatchEvent(new Event("knopka:strategyUpdated"));
