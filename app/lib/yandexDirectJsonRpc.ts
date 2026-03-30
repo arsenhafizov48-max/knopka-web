@@ -1,6 +1,11 @@
 const DIRECT_JSON_BASE = "https://api.direct.yandex.com/json/v5";
 
-export type DirectService = "campaigns" | "adgroups" | "ads" | "keywords";
+export type DirectService =
+  | "campaigns"
+  | "adgroups"
+  | "ads"
+  | "keywords"
+  | "bidmodifiers";
 
 export type DirectJsonRpcError = {
   error?: {
