@@ -7,6 +7,7 @@ import BrandIcon from "@/app/components/BrandIcon";
 import type { IntegrationPanelsPayload, IntegrationTone } from "@/app/lib/integrationsPanels";
 
 import { IntegrationsRefreshButton } from "@/app/app/systems/IntegrationsRefreshButton";
+import { AvitoIntegrationRow } from "@/app/app/systems/AvitoIntegrationRow";
 import { YandexDirectIntegrationRow } from "@/app/app/systems/YandexDirectIntegrationRow";
 import { YandexMetrikaIntegrationRow } from "@/app/app/systems/YandexMetrikaIntegrationRow";
 import { resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
@@ -257,6 +258,7 @@ export function SystemsPageClient() {
                 </div>
               ))}
               <YandexDirectIntegrationRow />
+              <AvitoIntegrationRow />
               {integrations.slice(3).map((x) => (
                 <div
                   key={x.name}

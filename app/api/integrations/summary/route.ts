@@ -38,6 +38,17 @@ export async function GET() {
 
   const lines: string[] = [];
 
+  const { data: avitoRows } = await admin
+    .from("avito_oauth")
+    .select("id, expires_at, updated_at")
+    .eq("user_id", user.id)
+    .limit(5);
+  if (avitoRows?.length) {
+    lines.push(`Авито: подключено (${avitoRows.length} аккаунт(ов)).`);
+  } else {
+    lines.push("Авито: не подключено.");
+  }
+
   const { data: dirOauthRows } = await admin
     .from("yandex_direct_oauth")
     .select("id, expires_at, yandex_login, yandex_email")
