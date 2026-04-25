@@ -30,6 +30,26 @@ export function AvitoIntegrationRow() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [flash, setFlash] = useState<{ text: string; tone: "ok" | "warn" | "bad" | "info" } | null>(null);
 
+  useEffect(() => {
+    try {
+      const url = new URL(window.location.href);
+      const av = url.searchParams.get("av");
+      const err = url.searchParams.get("av_error");
+      if (av === "connected") {
+        setFlash({ text: "Авито подключено", tone: "ok" });
+      } else if (err) {
+        setFlash({ text: `Авито: ${err}`, tone: "bad" });
+      }
+      if (av || err) {
+        url.searchParams.delete("av");
+        url.searchParams.delete("av_error");
+        window.history.replaceState(null, "", url.toString());
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const load = useCallback(() => {
     setSt({ kind: "loading" });
     fetch(resolveSameOriginApiUrl("/api/avito/status"), { credentials: "include" })
