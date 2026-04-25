@@ -19,6 +19,7 @@ export async function GET(request: Request) {
   if (!clientId) {
     return NextResponse.json({ error: "server_oauth_not_configured" }, { status: 503 });
   }
+  const scope = (process.env.AVITO_OAUTH_SCOPE?.trim() || "items:info,stats:read").replace(/\s+/g, "");
 
   const state = randomBytes(16).toString("hex");
   const cookieStore = await cookies();
@@ -34,6 +35,7 @@ export async function GET(request: Request) {
   const authUrl = new URL("https://avito.ru/oauth");
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", clientId);
+  authUrl.searchParams.set("scope", scope);
   authUrl.searchParams.set("redirect_uri", redirectUri);
   authUrl.searchParams.set("state", state);
 
