@@ -1,4 +1,6 @@
 // app/app/dashboard/page.tsx
+import { IntegrationsOverviewBlocks } from "@/app/app/components/IntegrationsOverviewBlocks";
+
 import StrategyCtaCard from "./StrategyCtaCard";
 import DashboardLiveBlocks from "./DashboardLiveBlocks";
 import WordstatHealthCard from "./WordstatHealthCard";
@@ -26,6 +28,8 @@ export default function Page() {
       <StrategyCtaCard />
 
       <WordstatHealthCard />
+
+      <IntegrationsOverviewBlocks compact showAiBlock={false} title="Интеграции" description="" />
 
       <DashboardLiveBlocks />
     </div>

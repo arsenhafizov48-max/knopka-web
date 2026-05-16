@@ -11,7 +11,7 @@ export async function GET() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.json({ authenticated: false, blockForAi: "" });
+    return NextResponse.json({ authenticated: false, blockForAi: "", cards: [] });
   }
 
   let admin;
@@ -21,7 +21,8 @@ export async function GET() {
     return NextResponse.json({
       authenticated: true,
       blockForAi:
-        "Интеграции: сервер без SUPABASE_SERVICE_ROLE_KEY — статус Яндекс Директ/Метрика/Авито недоступен.",
+        "Интеграции: сервер без SUPABASE_SERVICE_ROLE_KEY — сводка Метрика/Директ/Авито недоступна.",
+      cards: [],
     });
   }
 
@@ -29,9 +30,6 @@ export async function GET() {
 
   return NextResponse.json({
     authenticated: true,
-    blockForAi: overview.blockForAi,
-    direct: overview.direct,
-    metrika: overview.metrika,
-    avito: overview.avito,
+    ...overview,
   });
 }

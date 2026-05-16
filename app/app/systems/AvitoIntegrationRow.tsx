@@ -4,9 +4,21 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ArrowUpRight, RefreshCw, Trash2 } from "lucide-react";
 
-import { resolveSameOriginApiUrl, withBasePathResolved } from "@/app/lib/publicBasePath";
+import { resolveSameOriginApiUrl, withBasePath, withBasePathResolved } from "@/app/lib/publicBasePath";
 
-type Conn = { id: string; expiresAt: string | null; updatedAt: string | null };
+type Conn = {
+  id: string;
+  expiresAt: string | null;
+  updatedAt: string | null;
+  snapshot?: {
+    syncedAt: string | null;
+    syncStatus: string | null;
+    errorMessage: string | null;
+    totals: { itemsListed: number; uniqViews: number; uniqContacts: number } | null;
+    dateFrom: string | null;
+    dateTo: string | null;
+  } | null;
+};
 
 type State =
   | { kind: "loading" }
@@ -70,6 +82,32 @@ export function AvitoIntegrationRow() {
     window.addEventListener("knopka:integrationsRefresh", on);
     return () => window.removeEventListener("knopka:integrationsRefresh", on);
   }, [load]);
+
+  const sync = async (id: string) => {
+    setBusyId(id);
+    setFlash(null);
+    try {
+      const res = await fetch(resolveSameOriginApiUrl("/api/avito/sync"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ connectionId: id }),
+      });
+      const j = (await res.json()) as { ok?: boolean; error?: string; payload?: { totals?: { itemsListed?: number } } };
+      if (!res.ok || !j.ok) throw new Error(j.error || `HTTP ${res.status}`);
+      const n = j.payload?.totals?.itemsListed;
+      setFlash({
+        text: n != null ? `Выгружено: ${n} объявлений` : "Синхронизация завершена",
+        tone: "ok",
+      });
+      load();
+      window.dispatchEvent(new Event("knopka:integrationsRefresh"));
+    } catch (e) {
+      setFlash({ text: e instanceof Error ? e.message : "Ошибка", tone: "bad" });
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const disconnect = async (id: string) => {
     setBusyId(id);
@@ -162,16 +200,45 @@ export function AvitoIntegrationRow() {
                   {c.expiresAt ? (
                     <span className="text-neutral-500"> · токен до {new Date(c.expiresAt).toLocaleString("ru-RU")}</span>
                   ) : null}
+                  {c.snapshot?.syncStatus === "ok" && c.snapshot.totals ? (
+                    <span className="block text-neutral-500">
+                      Снимок: {c.snapshot.totals.itemsListed} объявл., просмотры {c.snapshot.totals.uniqViews}
+                      {c.snapshot.syncedAt
+                        ? ` · ${new Date(c.snapshot.syncedAt).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" })}`
+                        : null}
+                    </span>
+                  ) : c.snapshot?.errorMessage ? (
+                    <span className="block text-rose-600">{c.snapshot.errorMessage}</span>
+                  ) : (
+                    <span className="block text-amber-700">Снимок не выгружен — нажмите «Синхронизировать»</span>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  disabled={busyId === c.id}
-                  onClick={() => void disconnect(c.id)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-800 hover:bg-neutral-50 disabled:opacity-50"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Отключить
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busyId === c.id}
+                    onClick={() => void sync(c.id)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-800 hover:bg-neutral-50 disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${busyId === c.id ? "animate-spin" : ""}`} />
+                    Синхронизировать
+                  </button>
+                  <Link
+                    href={withBasePath(`/app/avito-data?connectionId=${encodeURIComponent(c.id)}`)}
+                    className="inline-flex items-center rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-neutral-50"
+                  >
+                    Открыть данные
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={busyId === c.id}
+                    onClick={() => void disconnect(c.id)}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-800 hover:bg-neutral-50 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Отключить
+                  </button>
+                </div>
               </div>
             ))}
           </div>

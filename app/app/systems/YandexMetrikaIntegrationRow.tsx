@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowUpRight, RefreshCw } from "lucide-react";
 
-import { resolveSameOriginApiUrl, withBasePathResolved } from "@/app/lib/publicBasePath";
+import { resolveSameOriginApiUrl, withBasePath, withBasePathResolved } from "@/app/lib/publicBasePath";
 
 type Status = "connected" | "partial" | "disconnected" | "manual";
 
@@ -399,6 +399,12 @@ export function YandexMetrikaIntegrationRow() {
                           <span>
                             #{x.counter_id} {x.site_name ? `· ${x.site_name}` : ""}
                           </span>
+                          <a
+                            href={withBasePath(`/app/metrika-data?counterRowId=${encodeURIComponent(x.id)}`)}
+                            className="text-blue-600 hover:underline"
+                          >
+                            Данные
+                          </a>
                           <button
                             type="button"
                             onClick={() => void onRemoveCounter(x.id)}
