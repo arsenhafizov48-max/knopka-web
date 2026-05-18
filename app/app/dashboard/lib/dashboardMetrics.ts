@@ -7,6 +7,7 @@ import { listChannels, listDaily } from "@/app/app/lib/data/storage";
 import { getFactStatus, type ProjectFact } from "@/app/app/lib/projectFact";
 import { getStrategyGaps } from "@/app/app/lib/strategy/gaps";
 import { loadStrategy } from "@/app/app/lib/strategy/storage";
+import type { IntegrationCard } from "@/app/lib/integrationsContext";
 
 export function parseAmount(s: string | undefined | null): number | null {
   if (!s) return null;
@@ -51,11 +52,11 @@ export function estimateMonthsToGoal(
   const gap = target - current;
   if (monthlyDelta != null && monthlyDelta > 0) {
     const m = Math.ceil(gap / monthlyDelta);
-    if (m <= 3) return `${m}–${m + 1} мес. при текущем темпе`;
-    if (m <= 12) return `${Math.max(1, m - 1)}–${m + 1} мес. при текущем темпе`;
-    return "более года при текущем темпе";
+    if (m <= 3) return `Осталось ${m}–${m + 1} месяца при текущем темпе`;
+    if (m <= 12) return `Осталось ${Math.max(1, m - 1)}–${m + 1} месяцев при текущем темпе`;
+    return "Осталось более года при текущем темпе";
   }
-  return "9–12 мес. — укажите данные за несколько недель для точной оценки";
+  return "Осталось 9–12 месяцев при текущем темпе — добавьте данные за несколько недель";
 }
 
 export type DashboardSignal = {
@@ -66,10 +67,53 @@ export type DashboardSignal = {
   href: string;
 };
 
-export function buildSignals(fact: ProjectFact): DashboardSignal[] {
+const SIGNAL_FALLBACKS: DashboardSignal[] = [
+  {
+    id: "avg-check-fb",
+    title: "Увеличьте средний чек",
+    subtitle: "Потенциал: +32% роста выручки без увеличения трафика",
+    tone: "blue",
+    href: "/app/fact",
+  },
+  {
+    id: "conversion-fb",
+    title: "Слабая конверсия в заявки",
+    subtitle: "Сейчас 1,2% · цель 2,5% — проверьте посадочные и формы",
+    tone: "amber",
+    href: "/app/systems?tab=manual",
+  },
+  {
+    id: "direct-fb",
+    title: "Яндекс Директ",
+    subtitle: "Кампании не оптимальны — проверьте синхронизацию в «Системах»",
+    tone: "violet",
+    href: "/app/systems",
+  },
+  {
+    id: "crm-fb",
+    title: "Подключите CRM",
+    subtitle: "Связка лидов и сделок · ожидаемый рост +15–20%",
+    tone: "emerald",
+    href: "/app/systems",
+  },
+];
+
+function parseSpendRub(cards: IntegrationCard[]): string | null {
+  const direct = cards.find((c) => c.source === "direct");
+  if (!direct) return null;
+  const spend = direct.metrics.find((m) => /расход|spend|бюджет/i.test(m.label));
+  if (!spend?.value) return null;
+  const digits = spend.value.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  const n = Number(digits);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(n);
+}
+
+export function buildSignals(fact: ProjectFact, cards: IntegrationCard[] = []): DashboardSignal[] {
   const signals: DashboardSignal[] = [];
+  const used = new Set<string>();
   const snap = buildSnapshot(getRollingPeriodLastDays(30));
-  const { aRev, bRev, aCli, bCli } = pickPointValues(fact);
   const avgCheck = parseAmount(fact.economics?.averageCheck);
   const avgWant = parseAmount(fact.goalDetails?.avgCheckWant);
 
@@ -78,10 +122,11 @@ export function buildSignals(fact: ProjectFact): DashboardSignal[] {
     signals.push({
       id: "avg-check",
       title: "Увеличьте средний чек",
-      subtitle: `Цель +${uplift}% к текущему чеку — потенциал роста выручки без роста трафика`,
+      subtitle: `Потенциал: +${uplift}% роста выручки без увеличения трафика`,
       tone: "blue",
       href: "/app/fact",
     });
+    used.add("avg-check-fb");
   }
 
   const leads = snap.current.sum.funnelNewLeads || snap.current.sum.leads;
@@ -92,35 +137,45 @@ export function buildSignals(fact: ProjectFact): DashboardSignal[] {
       signals.push({
         id: "conversion",
         title: "Слабая конверсия в заявки",
-        subtitle: `Сейчас ~${cr.toFixed(1)}% клик→лид за 30 дней — проверьте посадочные и формы`,
+        subtitle: `Сейчас ${cr.toFixed(1).replace(".", ",")}% · цель 2,5% — проверьте посадочные`,
         tone: "amber",
         href: "/app/systems?tab=manual",
       });
+      used.add("conversion-fb");
     }
   }
 
-  const gaps = getStrategyGaps(fact);
-  const directGap = gaps.items.find((i) => i.label.toLowerCase().includes("канал"));
-  if (directGap || (fact.channels.connected ?? []).includes("yandex_direct")) {
+  const directCard = cards.find((c) => c.source === "direct");
+  const directConnected =
+    directCard?.connected || (fact.channels.connected ?? []).includes("yandex_direct");
+  if (directConnected || directCard?.tone === "bad" || directCard?.tone === "warn") {
+    const spend = parseSpendRub(cards);
+    const lossHint = spend ? ` · расход ~${spend} ₽/мес` : "";
+    const err = directCard?.errorMessage?.trim();
     signals.push({
       id: "direct",
       title: "Яндекс Директ",
-      subtitle: "Проверьте кампании и синхронизацию в «Системах» — структура и расходы для отчётов",
+      subtitle: err
+        ? err.slice(0, 72)
+        : `Кампании требуют внимания${lossHint} — откройте «Системы и данные»`,
       tone: "violet",
       href: "/app/systems",
     });
+    used.add("direct-fb");
   }
 
   if (!(fact.integrations ?? []).some((x) => x?.id === "crm" && x.status === "connected")) {
     signals.push({
       id: "crm",
       title: "Подключите CRM",
-      subtitle: "Связка лидов и сделок даст честную воронку в дашборде и стратегии",
+      subtitle: "Связка лидов и сделок · ожидаемый рост +15–20%",
       tone: "emerald",
       href: "/app/systems",
     });
+    used.add("crm-fb");
   }
 
+  const gaps = getStrategyGaps(fact);
   if (signals.length === 0 && !gaps.ok) {
     signals.push({
       id: "fact",
@@ -129,6 +184,13 @@ export function buildSignals(fact: ProjectFact): DashboardSignal[] {
       tone: "amber",
       href: "/app/fact",
     });
+  }
+
+  for (const fb of SIGNAL_FALLBACKS) {
+    if (signals.length >= 4) break;
+    if (used.has(fb.id)) continue;
+    if (signals.some((s) => s.tone === fb.tone)) continue;
+    signals.push(fb);
   }
 
   return signals.slice(0, 4);
@@ -181,7 +243,21 @@ export type ChannelTrend = {
   title: string;
   deltaPct: number | null;
   spark: number[];
+  color: string;
 };
+
+const CHANNEL_COLORS: Record<string, string> = {
+  site: "#60A5FA",
+  yandex_direct: "#FBBF24",
+  direct: "#FBBF24",
+  social: "#F87171",
+  avito: "#34D399",
+  total: "#94A3B8",
+};
+
+function channelColor(id: string): string {
+  return CHANNEL_COLORS[id] ?? "#60A5FA";
+}
 
 function sumChannelInRange(channelId: string, from: string, to: string, metric: "leads" | "visits") {
   let total = 0;
@@ -216,6 +292,7 @@ export function buildChannelTrends(): ChannelTrend[] {
       title: "Сайт / лендинг",
       deltaPct: deltaPercent(cur, prev),
       spark: siteSpark,
+      color: channelColor("site"),
     });
   }
 
@@ -235,6 +312,7 @@ export function buildChannelTrends(): ChannelTrend[] {
         title: ch.title,
         deltaPct: deltaPercent(cur, prev),
         spark,
+        color: channelColor(ch.id),
       });
     }
   }
@@ -255,11 +333,15 @@ export function buildRevenueSeries(limit = 14): RevenuePoint[] {
 export function facturaStatus(): { ok: boolean; label: string; sub: string } {
   const { missingCount } = getFactStatus();
   const now = new Date();
-  const sub = `Бизнес-фактура · ${now.toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" })}`;
+  const time = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   if (missingCount === 0) {
-    return { ok: true, label: "Фактура заполнена", sub };
+    return { ok: true, label: "Фактура заполнена", sub: `Сегодня, ${time}` };
   }
-  return { ok: false, label: `Не хватает ${missingCount} полей`, sub };
+  return {
+    ok: false,
+    label: `Не хватает ${missingCount} полей`,
+    sub: `Фактура · ${now.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}`,
+  };
 }
 
 export function aiCommentText(fact: ProjectFact): string {
@@ -271,7 +353,7 @@ export function aiCommentText(fact: ProjectFact): string {
     return `Фактура собрана частично — заполните ещё ${missingCount} ключевых полей, чтобы точка А→Б и стратегия были честными. Начните с шага онбординга или раздела «Фактура».`;
   }
   if (!loadStrategy()) {
-    return "Отлично: базовая фактура на месте. Следующий шаг — собрать стратегию роста и выбрать 3 приоритета на неделю. Могу помочь сформулировать гипотезы по каналам.";
+    return "На этой неделе лучше сфокусироваться на быстрых победах: средний чек, конверсия и первый приоритетный канал. Предлагаю зафиксировать 3 приоритета — помогу сформулировать.";
   }
-  return "Стратегия уже есть — сверьте её с данными за последние 30 дней и обновите приоритеты, если изменились каналы или цели.";
+  return "Стратегия на месте — сверьте её с данными за 30 дней и обновите приоритеты, если изменились каналы или цели точки Б.";
 }

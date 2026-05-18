@@ -71,9 +71,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           {isOnboardingPage ? (
             <div>{children}</div>
           ) : (
-            <div className="rounded-2xl border border-white/5 bg-[#0a0f1a]/40 p-4 sm:p-6">
-              {children}
-            </div>
+            <div className="min-w-0">{children}</div>
           )}
         </main>
       </div>
