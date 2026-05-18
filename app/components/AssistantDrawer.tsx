@@ -75,8 +75,8 @@ export default function AssistantDrawer({ open, onClose }: Props) {
                 <span className="text-neutral-500"> — цели и фокус</span>
               </li>
               <li>
-                <Link href="/app/data" onClick={onClose} className="font-medium text-[#2B2B2B] underline-offset-2 hover:underline">
-                  Данные
+                <Link href="/app/systems?tab=manual" onClick={onClose} className="font-medium text-[#2B2B2B] underline-offset-2 hover:underline">
+                  Ручной ввод
                 </Link>
                 <span className="text-neutral-500"> — цифры по каналам</span>
               </li>

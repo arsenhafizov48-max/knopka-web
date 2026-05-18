@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
-/** Временный редирект: ежедневный ввод будет здесь или в «Данные» */
+import { withBasePath } from "@/app/lib/publicBasePath";
+
 export default function ManualDataPage() {
-  redirect("/app/data");
+  redirect(withBasePath("/app/systems?tab=manual"));
 }

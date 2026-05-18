@@ -81,8 +81,8 @@ export function buildCabinetNotifications(): CabinetNotification[] {
     items.push({
       id: "daily-never",
       title: "Ежедневные данные",
-      body: "Пока ни одного дня не внесено. Начни с сегодня или вчера на странице «Данные».",
-      href: "/app/data",
+      body: "Пока ни одного дня не внесено. Начни с сегодня или вчера в «Системах и данных» → Ручной ввод.",
+      href: "/app/systems?tab=manual",
       severity: "info",
     });
   } else {
@@ -92,7 +92,7 @@ export function buildCabinetNotifications(): CabinetNotification[] {
         id: `daily-missing-${y}`,
         title: "Данные за вчера",
         body: `Нет записи за ${y}. Заполни показатели за день — дашборд и отчёты будут актуальнее.`,
-        href: "/app/data",
+        href: "/app/systems?tab=manual",
         severity: "warning",
       });
     }

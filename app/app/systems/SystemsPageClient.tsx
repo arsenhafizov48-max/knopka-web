@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import BrandIcon from "@/app/components/BrandIcon";
+
+import { ManualDataSection } from "@/app/app/systems/ManualDataSection";
 
 import type { IntegrationPanelsPayload, IntegrationTone } from "@/app/lib/integrationsPanels";
 
@@ -10,7 +13,7 @@ import { IntegrationsRefreshButton } from "@/app/app/systems/IntegrationsRefresh
 import { AvitoIntegrationRow } from "@/app/app/systems/AvitoIntegrationRow";
 import { YandexDirectIntegrationRow } from "@/app/app/systems/YandexDirectIntegrationRow";
 import { YandexMetrikaIntegrationRow } from "@/app/app/systems/YandexMetrikaIntegrationRow";
-import { resolveSameOriginApiUrl } from "@/app/lib/publicBasePath";
+import { resolveSameOriginApiUrl, withBasePath } from "@/app/lib/publicBasePath";
 
 type Status = "connected" | "partial" | "disconnected" | "manual";
 
@@ -221,12 +224,27 @@ export function SystemsPageClient() {
 
   const historyMoreCount = Math.max(0, history.length - HISTORY_VISIBLE_DEFAULT);
 
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const tab = searchParams.get("tab") === "manual" ? "manual" : "integrations";
+
+  const setTab = (next: "integrations" | "manual") => {
+    router.replace(withBasePath(next === "manual" ? "/app/systems?tab=manual" : "/app/systems"));
+  };
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Системы и данные</h1>
+        <h1 className="text-2xl font-semibold text-white">Системы и данные</h1>
+        <p className="mt-1 text-sm text-slate-400">
+          Интеграции, источники и ручной ввод — всё, на чём строятся отчёты и стратегия.
+        </p>
+        <SystemsTabs tab={tab} setTab={setTab} />
       </div>
 
+      {tab === "manual" ? (
+        <ManualDataSection embedded />
+      ) : (
       <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
         <div className="space-y-6">
           <section className="rounded-2xl border border-neutral-200 bg-white p-5">
@@ -437,6 +455,38 @@ export function SystemsPageClient() {
           </section>
         </div>
       </div>
+      )}
+    </div>
+  );
+}
+
+function SystemsTabs({
+  tab,
+  setTab,
+}: {
+  tab: "integrations" | "manual";
+  setTab: (t: "integrations" | "manual") => void;
+}) {
+  return (
+    <div className="mt-4 inline-flex rounded-xl border border-white/10 bg-[#12192B] p-1">
+      <button
+        type="button"
+        onClick={() => setTab("integrations")}
+        className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+          tab === "integrations" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"
+        }`}
+      >
+        Интеграции
+      </button>
+      <button
+        type="button"
+        onClick={() => setTab("manual")}
+        className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+          tab === "manual" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-slate-200"
+        }`}
+      >
+        Ручной ввод
+      </button>
     </div>
   );
 }
