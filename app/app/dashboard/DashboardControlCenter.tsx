@@ -5,11 +5,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
-  BarChart3,
   ChevronRight,
+  Globe,
   Megaphone,
+  MessageCircle,
   MessageSquare,
-  Rocket,
+  Share2,
   Sparkles,
   Store,
   Target,
@@ -24,27 +25,38 @@ import { getStrategyGaps } from "@/app/app/lib/strategy/gaps";
 import { loadStrategy } from "@/app/app/lib/strategy/storage";
 
 import {
-  HeroIllustration,
-  KnopkaBotAvatar,
-  PointABConnector,
+  HeroGrowthScene,
+  KnopkaAiCore,
+  PointABRoute,
   RevenueChart,
   Sparkline,
 } from "./DashboardVisuals";
 import {
   aiCommentText,
-  buildChannelTrends,
+  buildChannelTrendsFull,
   buildRevenueSeries,
   buildSignals,
+  buildSystemsHealth,
   buildWeeklyPriorities,
-  estimateMonthsToGoal,
   facturaStatus,
   formatInt,
+  formatProgressCaption,
   formatRub,
   goalProgressPercent,
   pickPointValues,
   type ChannelTrend,
   type DashboardSignal,
+  type HealthRow,
 } from "./lib/dashboardMetrics";
+
+const HERO_CHIPS = [
+  { label: "Стратегия", href: "/app/strategy" },
+  { label: "Каналы", href: "/app/channels" },
+  { label: "Данные", href: "/app/systems?tab=manual" },
+  { label: "План", href: "/app/plans" },
+  { label: "Отчёты", href: "/app/reports" },
+  { label: "Рост", href: "/app/dashboard" },
+] as const;
 
 function Card({
   className = "",
@@ -126,35 +138,31 @@ export default function DashboardControlCenter() {
   const progress = Math.max(goalProgressPercent(aRev, bRev), goalProgressPercent(aCli, bCli));
   const snap = buildSnapshot(getRollingPeriodLastDays(30));
   const monthlyRevDelta = snap.current.sum.revenue - snap.previous.sum.revenue;
-  const monthsLine = estimateMonthsToGoal(aRev, bRev, monthlyRevDelta > 0 ? monthlyRevDelta : null);
+  const progressCaption = formatProgressCaption(
+    aRev,
+    bRev,
+    monthlyRevDelta > 0 ? monthlyRevDelta : null
+  );
 
   const factura = facturaStatus();
   const signals = buildSignals(fact, cards);
   const priorities = buildWeeklyPriorities(fact);
-  const channelTrends = useMemo(() => {
-    const live = buildChannelTrends();
-    if (live.length > 0) return live;
-    return [
-      { id: "site", title: "Сайт / лендинг", deltaPct: null, spark: [4, 6, 5, 8, 7, 9], color: "#60A5FA" },
-      { id: "yandex_direct", title: "Яндекс Директ", deltaPct: null, spark: [3, 4, 4, 5, 4, 6], color: "#FBBF24" },
-      { id: "social", title: "Соцсети", deltaPct: null, spark: [5, 4, 3, 4, 3, 3], color: "#F87171" },
-      { id: "avito", title: "Авито", deltaPct: null, spark: [2, 3, 4, 5, 6, 7], color: "#34D399" },
-    ] satisfies ChannelTrend[];
-  }, [rev]);
+  const channelTrends = useMemo(() => buildChannelTrendsFull(), [rev]);
+
+  const systemsHealth = useMemo(
+    () =>
+      buildSystemsHealth(cards, [
+        { id: "ga4", name: "GA4", status: "Не подключено", tone: "warn" },
+        { id: "gsc", name: "GSC", status: "Не подключено", tone: "bad" },
+        { id: "crm", name: "amoCRM", status: "Подключить", tone: "warn" },
+      ]),
+    [cards]
+  );
 
   const revenueSeries = buildRevenueSeries(14);
   const gaps = getStrategyGaps(fact);
   const hasStrategy = Boolean(loadStrategy());
   const comment = aiCommentText(fact);
-
-  const staticIntegrations = useMemo(
-    () => [
-      { name: "Google Analytics / GA4", status: "Подключить", tone: "warn" as const },
-      { name: "Google Search Console", status: "Не подключено", tone: "bad" as const },
-      { name: "amoCRM", status: "Подключить", tone: "warn" as const },
-    ],
-    []
-  );
 
   const openAi = () => window.dispatchEvent(new Event("knopka:openAssistant"));
 
@@ -195,8 +203,19 @@ export default function DashboardControlCenter() {
                 <ArrowRight className="h-4 w-4 opacity-80" />
               </Link>
             </div>
+            <div className="mt-6 flex flex-wrap gap-2 border-t border-white/[0.06] pt-5">
+              {HERO_CHIPS.map((chip) => (
+                <Link
+                  key={chip.label}
+                  href={withBasePath(chip.href)}
+                  className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-blue-500/30 hover:bg-blue-500/10 hover:text-white"
+                >
+                  {chip.label}
+                </Link>
+              ))}
+            </div>
           </div>
-          <HeroIllustration />
+          <HeroGrowthScene />
         </div>
       </Card>
 
@@ -209,16 +228,28 @@ export default function DashboardControlCenter() {
               Изменить
             </Link>
           </div>
-          <PointABBlock aRev={aRev} aCli={aCli} bRev={bRev} bCli={bCli} progress={progress} monthsLine={monthsLine} />
+          <PointABBlock
+            aRev={aRev}
+            aCli={aCli}
+            bRev={bRev}
+            bCli={bCli}
+            progress={progress}
+            progressCaption={progressCaption}
+          />
         </Card>
 
         <Card className="flex flex-col p-5 sm:p-6">
-          <h2 className="text-center text-[15px] font-semibold text-white">Комментарий КНОПКИ</h2>
-          <div className="mt-5 flex flex-1 flex-col">
-            <KnopkaBotAvatar />
-            <p className="mt-5 text-left text-sm leading-relaxed text-slate-300">{comment}</p>
+          <h2 className="text-[15px] font-semibold text-white">Комментарий КНОПКИ</h2>
+          <div className="mt-4 flex flex-1 flex-col gap-4 sm:flex-row sm:items-start">
+            <KnopkaAiCore />
+            <p className="min-w-0 flex-1 text-sm leading-relaxed text-slate-300">{comment}</p>
           </div>
-          <button type="button" onClick={openAi} className={`mt-5 w-full ${BTN_GHOST}`}>
+          <button
+            type="button"
+            onClick={openAi}
+            className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/[0.04] px-4 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/[0.08] sm:w-auto sm:self-start"
+          >
+            <MessageCircle className="h-4 w-4 text-cyan-400" />
             Спросить у ИИ
           </button>
         </Card>
@@ -230,7 +261,7 @@ export default function DashboardControlCenter() {
               <li key={s.id}>
                 <Link
                   href={withBasePath(s.href)}
-                  className="group flex items-start gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 transition hover:border-white/10 hover:bg-white/[0.05]"
+                  className="group flex min-h-[72px] items-start gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 transition hover:border-white/10 hover:bg-white/[0.05]"
                 >
                   <span
                     className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${SIGNAL_CLS[s.tone]}`}
@@ -242,8 +273,11 @@ export default function DashboardControlCenter() {
                       {s.title}
                     </span>
                     <span className="mt-0.5 block text-xs leading-snug text-slate-400">{s.subtitle}</span>
+                    {s.metric ? (
+                      <span className="mt-1 inline-block text-[11px] font-semibold text-slate-300">{s.metric}</span>
+                    ) : null}
                   </span>
-                  <ChevronRight className="mt-2 h-4 w-4 shrink-0 text-slate-600 group-hover:text-slate-400" />
+                  <ChevronRight className="mt-3 h-4 w-4 shrink-0 text-slate-600 group-hover:text-slate-400" />
                 </Link>
               </li>
             ))}
@@ -255,23 +289,17 @@ export default function DashboardControlCenter() {
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="p-5">
           <h2 className="text-[15px] font-semibold text-white">Системы и данные</h2>
-          <ul className="mt-4 space-y-3">
-            {cards.map((c) => (
-              <li key={c.id} className="flex items-center gap-2.5 text-sm">
-                <IntegrationDot tone={c.tone} />
-                <IntegrationIcon source={c.source} />
-                <span className="min-w-0 flex-1 truncate text-slate-200">{c.title}</span>
-                <span className="max-w-[42%] shrink-0 truncate text-right text-xs text-slate-500">
-                  {shortStatus(c.statusText)}
-                </span>
-              </li>
-            ))}
-            {staticIntegrations.map((row) => (
-              <li key={row.name} className="flex items-center gap-2.5 text-sm">
-                <IntegrationDot tone={row.tone} />
-                <span className="h-4 w-4 shrink-0 rounded bg-white/10" />
-                <span className="min-w-0 flex-1 text-slate-200">{row.name}</span>
-                <span className="text-xs text-slate-500">{row.status}</span>
+          <ul className="mt-4 space-y-2">
+            {systemsHealth.map((row) => (
+              <li
+                key={row.id}
+                className="flex items-center justify-between gap-2 rounded-lg border border-white/[0.04] bg-white/[0.02] px-2.5 py-2"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <HealthDot tone={row.tone} />
+                  <span className="truncate text-sm text-slate-200">{row.name}</span>
+                </div>
+                <span className="shrink-0 text-[11px] text-slate-500">{row.status}</span>
               </li>
             ))}
           </ul>
@@ -288,7 +316,10 @@ export default function DashboardControlCenter() {
           <ul className="mt-4 space-y-3.5">
             {channelTrends.map((ch) => (
               <li key={ch.id} className="flex items-center justify-between gap-2">
-                <span className="text-sm text-slate-200">{ch.title}</span>
+                <div className="flex min-w-0 items-center gap-2">
+                  <ChannelIcon id={ch.id} />
+                  <span className="truncate text-sm text-slate-200">{ch.title}</span>
+                </div>
                 <ChannelTrendCell ch={ch} />
               </li>
             ))}
@@ -309,19 +340,20 @@ export default function DashboardControlCenter() {
             <ol className="mt-4 space-y-3">
               {priorities.map((p) => (
                 <li key={p.n}>
-                  <Link href={withBasePath(p.href)} className="group -m-1 flex gap-3 rounded-xl p-1 hover:bg-white/5">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600/40 to-violet-600/30 text-sm font-bold text-blue-200">
+                  <Link
+                    href={withBasePath(p.href)}
+                    className="group -m-1 flex items-start gap-3 rounded-xl p-1.5 hover:bg-white/5"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600/50 to-violet-600/40 text-xs font-bold text-blue-100">
                       {p.n}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm leading-snug text-slate-100 group-hover:text-white">
                         {p.title}
                       </span>
-                      <span className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                        <span>до {p.due}</span>
-                        <PriorityBadge priority={p.priority} />
-                      </span>
+                      <span className="mt-1 block text-[11px] text-slate-500">до {p.due}</span>
                     </span>
+                    <PriorityBadge priority={p.priority} />
                   </Link>
                 </li>
               ))}
@@ -349,12 +381,12 @@ export default function DashboardControlCenter() {
       </div>
 
       {/* Футер CTA */}
-      <Card className="relative overflow-hidden border-blue-500/25 bg-gradient-to-r from-[#0f1528] via-[#12102a] to-[#0f1528] p-5 sm:p-6">
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-blue-600/10 to-transparent" />
+      <Card className="relative overflow-hidden border border-blue-500/20 bg-gradient-to-r from-[#0c1222] via-[#101830] to-[#0c1222] p-5 sm:p-6 shadow-[inset_0_1px_0_rgba(96,165,250,0.1)]">
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-2/5 bg-gradient-to-r from-blue-600/12 to-transparent" />
         <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500/20 text-blue-300">
-              <Target className="h-5 w-5" />
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-blue-400/25 bg-blue-500/15 shadow-[0_0_20px_rgba(59,130,246,0.2)]">
+              <Target className="h-5 w-5 text-cyan-300" />
             </div>
             <div>
               <p className="text-sm font-semibold text-white">Следующий шаг</p>
@@ -388,14 +420,14 @@ function PointABBlock({
   bRev,
   bCli,
   progress,
-  monthsLine,
+  progressCaption,
 }: {
   aRev: number | null;
   aCli: number | null;
   bRev: number | null;
   bCli: number | null;
   progress: number;
-  monthsLine: string;
+  progressCaption: string;
 }) {
   return (
   <>
@@ -407,12 +439,9 @@ function PointABBlock({
           <p className="mt-2 text-[11px] text-slate-500">Продажи в месяц</p>
           <p className="text-lg font-semibold text-white">{formatInt(aCli)}</p>
         </div>
-        <div className="flex items-center justify-center py-1 sm:flex-col sm:py-0">
-          <PointABConnector />
-          <Rocket className="h-6 w-6 text-violet-400 drop-shadow-[0_0_8px_rgba(139,92,246,0.6)] sm:hidden" />
-        </div>
-        <div className="flex-1 rounded-xl border border-violet-500/35 bg-gradient-to-br from-violet-600/15 to-blue-600/5 p-3.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-300/90">Точка Б (цель)</p>
+        <PointABRoute />
+        <div className="flex-1 rounded-xl border border-violet-400/40 bg-gradient-to-br from-violet-600/25 via-violet-600/10 to-blue-600/10 p-3.5 shadow-[0_0_24px_rgba(139,92,246,0.12)]">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-200">Точка Б (цель)</p>
           <p className="mt-3 text-[11px] text-violet-200/70">Выручка в месяц</p>
           <p className="text-xl font-bold text-white">{formatRub(bRev)}</p>
           <p className="mt-2 text-[11px] text-violet-200/70">Продажи в месяц</p>
@@ -424,13 +453,13 @@ function PointABBlock({
           <span className="font-medium text-slate-300">Путь к цели</span>
           <span className="font-bold text-white">{progress}%</span>
         </div>
-        <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-white/10">
+        <div className="mt-2 h-3 overflow-hidden rounded-full bg-white/10">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-blue-500 via-blue-400 to-violet-500 shadow-[0_0_12px_rgba(96,165,250,0.5)]"
-            style={{ width: `${Math.max(progress, 2)}%` }}
+            className="h-full rounded-full bg-gradient-to-r from-blue-600 via-blue-400 to-violet-500 shadow-[0_0_14px_rgba(96,165,250,0.45)]"
+            style={{ width: `${Math.max(progress, 3)}%` }}
           />
         </div>
-        <p className="mt-2.5 text-xs leading-relaxed text-slate-400">{monthsLine}</p>
+        <p className="mt-2 text-xs text-slate-400">{progressCaption}</p>
       </div>
     </>
   );
@@ -456,16 +485,10 @@ function PriorityBadge({ priority }: { priority: "high" | "medium" | "low" }) {
   );
 }
 
-function shortStatus(text: string): string {
-  const part = text.split("·")[0]?.trim() ?? text;
-  if (part.length > 28) return `${part.slice(0, 26)}…`;
-  return part;
-}
-
-function IntegrationDot({ tone }: { tone: IntegrationCard["tone"] }) {
+function HealthDot({ tone }: { tone: HealthRow["tone"] }) {
   const c =
     tone === "ok"
-      ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"
+      ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.55)]"
       : tone === "bad"
         ? "bg-rose-400 shadow-[0_0_6px_rgba(251,113,133,0.5)]"
         : tone === "warn"
@@ -474,10 +497,12 @@ function IntegrationDot({ tone }: { tone: IntegrationCard["tone"] }) {
   return <span className={`h-2 w-2 shrink-0 rounded-full ${c}`} />;
 }
 
-function IntegrationIcon({ source }: { source: IntegrationCard["source"] }) {
-  if (source === "metrika") return <BarChart3 className="h-4 w-4 shrink-0 text-sky-400" />;
-  if (source === "avito") return <Store className="h-4 w-4 shrink-0 text-emerald-400" />;
-  return <Megaphone className="h-4 w-4 shrink-0 text-violet-400" />;
+function ChannelIcon({ id }: { id: string }) {
+  const cls = "h-4 w-4 shrink-0";
+  if (id === "site") return <Globe className={`${cls} text-sky-400`} />;
+  if (id === "avito") return <Store className={`${cls} text-emerald-400`} />;
+  if (id === "social") return <Share2 className={`${cls} text-rose-400`} />;
+  return <Megaphone className={`${cls} text-amber-400`} />;
 }
 
 function ChannelTrendCell({ ch }: { ch: ChannelTrend }) {

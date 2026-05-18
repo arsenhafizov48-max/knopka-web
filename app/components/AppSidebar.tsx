@@ -74,7 +74,7 @@ export default function AppSidebar({
           type="button"
           onClick={onToggleCollapsed}
           className={cn(
-            "absolute top-4 -right-4 z-20",
+            "absolute top-4 right-2 z-20",
             "inline-flex h-9 w-9 items-center justify-center",
             "rounded-full border border-white/15 bg-[#12192B] text-slate-200",
             "shadow-lg hover:bg-[#1a2540] transition"

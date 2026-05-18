@@ -56,14 +56,34 @@ export function estimateMonthsToGoal(
     if (m <= 12) return `Осталось ${Math.max(1, m - 1)}–${m + 1} месяцев при текущем темпе`;
     return "Осталось более года при текущем темпе";
   }
-  return "Осталось 9–12 месяцев при текущем темпе — добавьте данные за несколько недель";
+  return "При текущем темпе цель достижима за 9–12 месяцев";
 }
+
+export function formatProgressCaption(
+  current: number | null,
+  target: number | null,
+  monthlyDelta: number | null
+): string {
+  if (current == null || target == null || target <= 0) return "Заполните точку А и Б в фактуре";
+  if (current >= target) return "Цель по выручке уже достигнута";
+  if (monthlyDelta != null && monthlyDelta > 0) {
+    const gap = target - current;
+    const m = Math.ceil(gap / monthlyDelta);
+    if (m <= 12) return `При текущем темпе цель достижима за ${Math.max(1, m - 1)}–${m + 1} месяцев`;
+    return "Текущий темп ниже целевого — нужен системный разгон";
+  }
+  return "При текущем темпе цель достижима за 9–12 месяцев";
+}
+
+export type SignalKind = "growth" | "warning" | "action" | "system";
 
 export type DashboardSignal = {
   id: string;
   title: string;
   subtitle: string;
+  metric?: string;
   tone: "blue" | "amber" | "violet" | "emerald";
+  kind: SignalKind;
   href: string;
 };
 
@@ -71,29 +91,37 @@ const SIGNAL_FALLBACKS: DashboardSignal[] = [
   {
     id: "avg-check-fb",
     title: "Увеличьте средний чек",
-    subtitle: "Потенциал: +32% роста выручки без увеличения трафика",
+    subtitle: "Рост выручки без увеличения трафика",
+    metric: "Потенциал: +32%",
     tone: "blue",
+    kind: "growth",
     href: "/app/fact",
   },
   {
     id: "conversion-fb",
     title: "Слабая конверсия в заявки",
-    subtitle: "Сейчас 1,2% · цель 2,5% — проверьте посадочные и формы",
+    subtitle: "Проверьте посадочные и формы",
+    metric: "1,2% · цель 2,5%",
     tone: "amber",
+    kind: "warning",
     href: "/app/systems?tab=manual",
   },
   {
     id: "direct-fb",
     title: "Яндекс Директ",
-    subtitle: "Кампании не оптимальны — проверьте синхронизацию в «Системах»",
+    subtitle: "Кампании требуют оптимизации",
+    metric: "Системная задача",
     tone: "violet",
+    kind: "system",
     href: "/app/systems",
   },
   {
     id: "crm-fb",
     title: "Подключите CRM",
-    subtitle: "Связка лидов и сделок · ожидаемый рост +15–20%",
+    subtitle: "Связка лидов и сделок",
+    metric: "Ожидаемый рост +15–20%",
     tone: "emerald",
+    kind: "action",
     href: "/app/systems",
   },
 ];
@@ -122,8 +150,10 @@ export function buildSignals(fact: ProjectFact, cards: IntegrationCard[] = []): 
     signals.push({
       id: "avg-check",
       title: "Увеличьте средний чек",
-      subtitle: `Потенциал: +${uplift}% роста выручки без увеличения трафика`,
+      subtitle: "Рост выручки без увеличения трафика",
+      metric: `Потенциал: +${uplift}%`,
       tone: "blue",
+      kind: "growth",
       href: "/app/fact",
     });
     used.add("avg-check-fb");
@@ -137,8 +167,10 @@ export function buildSignals(fact: ProjectFact, cards: IntegrationCard[] = []): 
       signals.push({
         id: "conversion",
         title: "Слабая конверсия в заявки",
-        subtitle: `Сейчас ${cr.toFixed(1).replace(".", ",")}% · цель 2,5% — проверьте посадочные`,
+        subtitle: "Проверьте посадочные и формы",
+        metric: `${cr.toFixed(1).replace(".", ",")}% · цель 2,5%`,
         tone: "amber",
+        kind: "warning",
         href: "/app/systems?tab=manual",
       });
       used.add("conversion-fb");
@@ -150,15 +182,14 @@ export function buildSignals(fact: ProjectFact, cards: IntegrationCard[] = []): 
     directCard?.connected || (fact.channels.connected ?? []).includes("yandex_direct");
   if (directConnected || directCard?.tone === "bad" || directCard?.tone === "warn") {
     const spend = parseSpendRub(cards);
-    const lossHint = spend ? ` · расход ~${spend} ₽/мес` : "";
     const err = directCard?.errorMessage?.trim();
     signals.push({
       id: "direct",
       title: "Яндекс Директ",
-      subtitle: err
-        ? err.slice(0, 72)
-        : `Кампании требуют внимания${lossHint} — откройте «Системы и данные»`,
+      subtitle: err ? err.slice(0, 56) : "Кампании требуют внимания",
+      metric: spend ? `Расход ~${spend} ₽/мес` : "Системная задача",
       tone: "violet",
+      kind: "system",
       href: "/app/systems",
     });
     used.add("direct-fb");
@@ -168,8 +199,10 @@ export function buildSignals(fact: ProjectFact, cards: IntegrationCard[] = []): 
     signals.push({
       id: "crm",
       title: "Подключите CRM",
-      subtitle: "Связка лидов и сделок · ожидаемый рост +15–20%",
+      subtitle: "Связка лидов и сделок",
+      metric: "Ожидаемый рост +15–20%",
       tone: "emerald",
+      kind: "action",
       href: "/app/systems",
     });
     used.add("crm-fb");
@@ -180,8 +213,10 @@ export function buildSignals(fact: ProjectFact, cards: IntegrationCard[] = []): 
     signals.push({
       id: "fact",
       title: "Дозаполните фактуру",
-      subtitle: `${gaps.items.length} полей для честной стратегии и точки А→Б`,
+      subtitle: "Для честной стратегии и точки А→Б",
+      metric: `${gaps.items.length} полей`,
       tone: "amber",
+      kind: "warning",
       href: "/app/fact",
     });
   }
@@ -205,34 +240,39 @@ export type WeeklyPriority = {
 };
 
 export function buildWeeklyPriorities(fact: ProjectFact): WeeklyPriority[] {
+  const base = new Date();
   const strategy = loadStrategy();
   const next = strategy?.sections?.find((s) => s.id === "next");
   const fromStrategy = (next?.bullets ?? []).slice(0, 3);
+
+  let items: Array<{ title: string; priority: WeeklyPriority["priority"]; href: string }>;
   if (fromStrategy.length > 0) {
-    const base = new Date();
-    return fromStrategy.map((title, i) => {
-      const d = new Date(base);
-      d.setDate(d.getDate() + 2 + i * 2);
-      return {
-        n: i + 1,
-        title,
-        due: d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }),
-        priority: i === 0 ? "high" : i === 1 ? "high" : "medium",
-        href: "/app/strategy",
-      };
-    });
+    items = fromStrategy.map((title, i) => ({
+      title: shortenTaskTitle(title),
+      priority: (i === 0 ? "high" : i === 1 ? "high" : "medium") as WeeklyPriority["priority"],
+      href: "/app/strategy",
+    }));
+  } else {
+    const gaps = getStrategyGaps(fact);
+    if (gaps.items.length > 0) {
+      items = gaps.items.slice(0, 3).map((it, i) => ({
+        title: shortenTaskTitle(it.label),
+        priority: (i < 2 ? "high" : "medium") as WeeklyPriority["priority"],
+        href: it.href,
+      }));
+    } else {
+      items = DEFAULT_PRIORITIES;
+    }
   }
 
-  const gaps = getStrategyGaps(fact);
-  const base = new Date();
-  return gaps.items.slice(0, 3).map((it, i) => {
+  return items.slice(0, 3).map((it, i) => {
     const d = new Date(base);
-    d.setDate(d.getDate() + 3 + i * 2);
+    d.setDate(d.getDate() + 2 + i * 2);
     return {
       n: i + 1,
-      title: it.label,
+      title: it.title,
       due: d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" }),
-      priority: i < 2 ? "high" : "medium",
+      priority: it.priority,
       href: it.href,
     };
   });
@@ -320,6 +360,37 @@ export function buildChannelTrends(): ChannelTrend[] {
   return out.slice(0, 5);
 }
 
+const DEFAULT_CHANNELS: ChannelTrend[] = [
+  { id: "site", title: "Сайт / лендинг", deltaPct: null, spark: [4, 6, 5, 8, 7, 9], color: "#60A5FA" },
+  { id: "yandex_direct", title: "Яндекс Директ", deltaPct: null, spark: [3, 4, 4, 5, 4, 6], color: "#FBBF24" },
+  { id: "social", title: "Соцсети", deltaPct: null, spark: [5, 4, 3, 4, 3, 3], color: "#F87171" },
+  { id: "avito", title: "Авито", deltaPct: null, spark: [2, 3, 4, 5, 6, 7], color: "#34D399" },
+];
+
+export function buildChannelTrendsFull(): ChannelTrend[] {
+  const live = buildChannelTrends();
+  const merged: ChannelTrend[] = [];
+  for (const def of DEFAULT_CHANNELS) {
+    const match =
+      live.find((c) => c.id === def.id) ??
+      live.find((c) => def.id === "yandex_direct" && /директ|direct/i.test(c.title));
+    merged.push(match ?? def);
+  }
+  return merged;
+}
+
+function shortenTaskTitle(title: string): string {
+  const t = title.trim();
+  if (t.length <= 52) return t;
+  return `${t.slice(0, 50)}…`;
+}
+
+const DEFAULT_PRIORITIES: Omit<WeeklyPriority, "n" | "due">[] = [
+  { title: "Проверить и обновить фактуру", priority: "high", href: "/app/fact" },
+  { title: "Внести показатели за неделю", priority: "high", href: "/app/systems?tab=manual" },
+  { title: "Подключить CRM и закрыть разрыв по лидам", priority: "medium", href: "/app/systems" },
+];
+
 export type RevenuePoint = { date: string; revenue: number };
 
 export function buildRevenueSeries(limit = 14): RevenuePoint[] {
@@ -344,16 +415,57 @@ export function facturaStatus(): { ok: boolean; label: string; sub: string } {
   };
 }
 
+function isUsableAiComment(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 24) return false;
+  if (/^[\p{L}\p{N}\s]{1,12}$/u.test(t)) return false;
+  return true;
+}
+
 export function aiCommentText(fact: ProjectFact): string {
   const custom = fact.materials?.aiComment?.trim();
-  if (custom) return custom;
+  if (custom && isUsableAiComment(custom)) return custom;
+
   const { missingCount } = getFactStatus();
-  const gaps = getStrategyGaps(fact);
   if (missingCount > 0) {
-    return `Фактура собрана частично — заполните ещё ${missingCount} ключевых полей, чтобы точка А→Б и стратегия были честными. Начните с шага онбординга или раздела «Фактура».`;
+    return `Фактура собрана частично — заполните ещё ${missingCount} ключевых полей. Без этого точка А→Б и стратегия будут неточными.`;
   }
   if (!loadStrategy()) {
-    return "На этой неделе лучше сфокусироваться на быстрых победах: средний чек, конверсия и первый приоритетный канал. Предлагаю зафиксировать 3 приоритета — помогу сформулировать.";
+    return "Фактура на месте. Сейчас главный потенциал — не в трафике, а в конверсии и связке с CRM. Следующий шаг: стратегия и 3 приоритета на неделю.";
   }
-  return "Стратегия на месте — сверьте её с данными за 30 дней и обновите приоритеты, если изменились каналы или цели точки Б.";
+  return "По текущим данным видны 2 точки роста: средний чек и доведение заявки до сделки. Сверьте стратегию с цифрами за 30 дней.";
+}
+
+export type HealthRow = {
+  id: string;
+  name: string;
+  status: string;
+  tone: "ok" | "warn" | "bad" | "neutral";
+};
+
+export function buildSystemsHealth(
+  cards: IntegrationCard[],
+  staticRows: HealthRow[]
+): HealthRow[] {
+  const fromCards: HealthRow[] = cards.map((c) => ({
+    id: c.id,
+    name: healthName(c),
+    status: healthStatusLabel(c),
+    tone: c.tone === "info" ? "neutral" : c.tone,
+  }));
+  return [...fromCards, ...staticRows].slice(0, 6);
+}
+
+function healthName(c: IntegrationCard): string {
+  if (c.source === "metrika") return "Метрика";
+  if (c.source === "direct") return "Яндекс Директ";
+  if (c.source === "avito") return "Авито";
+  return c.title.split("·")[0]?.trim() ?? c.title;
+}
+
+function healthStatusLabel(c: IntegrationCard): string {
+  if (c.tone === "ok") return "Подключено";
+  if (c.tone === "bad") return c.errorMessage ? "Ошибка синхронизации" : "Не подключено";
+  if (c.tone === "warn") return "Требует внимания";
+  return c.statusText.split("·")[0]?.trim() ?? "—";
 }
