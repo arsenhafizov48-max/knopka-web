@@ -48,14 +48,16 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#070b14] text-slate-100">
-      <div className="sticky top-0 z-50 border-b border-white/5 bg-[#070b14]/90 backdrop-blur-md">
-        <div className="px-4 py-3 lg:px-5">
-          <AppTopbar />
+    <div className="min-h-screen bg-[#F4F7FF]">
+      <div className="sticky top-0 z-50 bg-[#F4F7FF]">
+        <div className="px-[15px] pt-5">
+          <div className="rounded-2xl border border-neutral-200/70 bg-white/0 px-4 py-2 backdrop-blur-md supports-[backdrop-filter]:bg-white/60">
+            <AppTopbar />
+          </div>
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-none gap-5 px-4 pb-8 pt-4 lg:px-5">
+      <div className="mx-auto flex w-full max-w-none gap-6 px-[15px] pb-6 pt-5">
         {!isOnboardingPage ? (
           <aside
             className="hidden shrink-0 lg:block transition-[width] duration-200 ease-out"
@@ -71,7 +73,9 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           {isOnboardingPage ? (
             <div>{children}</div>
           ) : (
-            <div className="min-w-0">{children}</div>
+            <div className="rounded-3xl border border-neutral-200 bg-white p-6 shadow-[0_1px_0_rgba(16,24,40,0.04)]">
+              {children}
+            </div>
           )}
         </main>
       </div>
